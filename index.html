@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Malwa Grain Merchants | Pro Ledger</title>
+    
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <section id="auth-view" class="view active auth-container">
+        <div class="auth-box">
+            <i class="ph ph-book-open-text auth-logo"></i>
+            <h2>Malwa Ledger Pro</h2>
+            <p class="text-secondary">Sign in to sync your data</p>
+            <form id="login-form">
+                <div id="login-error" class="text-danger hidden" style="margin-bottom: 1rem; font-size: 0.875rem; text-align: center;"></div>
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" id="login-email" placeholder="merchant@test.com" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="login-pwd" required>
+                </div>
+                <button type="submit" class="btn-primary full-width">Secure Login</button>
+                <button type="button" id="btn-skip-login" class="btn-outline full-width" style="margin-top: 8px;">Skip Login (Test Mode)</button>
+            </form>
+        </div>
+    </section>
+
+    <div id="app-wrapper" class="hidden">
+        <nav class="navbar">
+            <div class="nav-brand">
+                <i class="ph ph-book-open-text"></i>
+                <h1>Malwa Ledger</h1>
+            </div>
+            <div class="nav-links">
+                <button class="nav-tab active" data-target="dashboard-view">
+                    <i class="ph ph-users"></i> Parties
+                </button>
+                <button class="nav-tab" data-target="bills-view">
+                    <i class="ph ph-receipt"></i> Bills
+                </button>
+                <button class="nav-tab" data-target="items-view">
+                    <i class="ph ph-package"></i> Items
+                </button>
+                <button class="nav-tab" data-target="calculator-view">
+                    <i class="ph ph-calculator"></i> Calculator
+                </button>
+                <button class="nav-tab" data-target="reports-view">
+                    <i class="ph ph-chart-line-up"></i> Reports
+                </button>
+                <button class="nav-tab" data-target="more-view">
+                    <i class="ph ph-dots-three-circle"></i> More
+                </button>
+            </div>
+            <div class="nav-actions">
+                <button id="theme-toggle" class="btn-icon" aria-label="Toggle Theme"><i class="ph ph-moon"></i></button>
+                <button id="btn-logout" class="btn-outline btn-sm">Logout</button>
+            </div>
+        </nav>
+
+        <main class="container">
+            <section id="dashboard-view" class="view active tab-content">
+                <div class="header-actions">
+                    <div class="search-bar">
+                        <i class="ph ph-magnifying-glass"></i>
+                        <input type="text" id="search-input" placeholder="Search customers...">
+                    </div>
+                    <button id="btn-new-customer" class="btn-primary">
+                        <i class="ph ph-plus"></i> New Customer
+                    </button>
+                </div>
+                
+                <div class="customer-list-container">
+                    <table id="customer-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th class="text-right">Outstanding Balance</th>
+                                <th class="text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customer-list-body">
+                            </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="analytics-view" class="view hidden tab-content">
+                <div class="analytics-header">
+                    <h2>Business Health Overview</h2>
+                    <p class="text-secondary">Aggregate data across all customer accounts.</p>
+                </div>
+                <div class="summary-cards">
+                    <div class="card highlight-danger">
+                        <h3>Total Floating Capital (Market Debt)</h3>
+                        <p id="stat-floating" class="amount">₹0.00</p>
+                    </div>
+                    <div class="card highlight-success">
+                        <h3>Total Expected Accrued Interest</h3>
+                        <p id="stat-accrued" class="amount">₹0.00</p>
+                    </div>
+                    <div class="card">
+                        <h3>Total You Owe (Deposits)</h3>
+                        <p id="stat-deposits" class="amount">₹0.00</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="more-view" class="view hidden tab-content">
+                <div class="profile-header-card">
+                    <div class="business-title-bar">
+                        <div class="business-info">
+                            <i class="ph ph-book-bookmark business-icon"></i>
+                            <div>
+                                <h3>My Business <i class="ph ph-pencil-simple edit-icon"></i></h3>
+                                <p class="text-secondary location-text"><i class="ph ph-map-pin"></i> Sajapur, Madhya Pradesh</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="profile-card-body">
+                        <div class="profile-card-header">
+                            <div class="avatar-circle"></div>
+                            <span class="profile-name">My Business</span>
+                            <button class="btn-outline btn-sm btn-edit-profile">Edit</button>
+                        </div>
+
+                        <div class="profile-strength-bar">
+                            <div class="strength-label">
+                                <span>Profile strength : <strong class="text-danger">Weak</strong></span>
+                                <span class="text-danger font-bold">17%</span>
+                            </div>
+                            <div class="progress-track">
+                                <div class="progress-fill" style="width: 17%;"></div>
+                            </div>
+                        </div>
+
+                        <div class="business-card-promo">
+                            <div class="promo-text">
+                                <h4>Fill missing details for a FREE Business Card</h4>
+                                <button class="btn-proceed">PROCEED</button>
+                            </div>
+                            <div class="promo-card-graphic">
+                                <div class="mini-business-card">
+                                    <div class="card-lines"></div>
+                                    <span>Business Card</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="more-grid">
+                    <div class="grid-card" data-target="cashbook-view">
+                        <div class="icon-circle icon-blue">
+                            <i class="ph ph-currency-inr"></i>
+                        </div>
+                        <span>Cashbook</span>
+                    </div>
+                    <div class="grid-card" data-target="bills-view">
+                        <div class="icon-circle icon-red">
+                            <i class="ph ph-receipt"></i>
+                        </div>
+                        <span>Bills</span>
+                    </div>
+                    <div class="grid-card" data-target="items-view">
+                        <div class="icon-circle icon-purple">
+                            <i class="ph ph-package"></i>
+                        </div>
+                        <span>Items</span>
+                    </div>
+                    <div class="grid-card" data-target="staff-view">
+                        <div class="icon-circle icon-yellow">
+                            <i class="ph ph-user-plus"></i>
+                        </div>
+                        <span>Staff</span>
+                    </div>
+                    <div class="grid-card" data-target="collection-view">
+                        <div class="icon-circle icon-orange">
+                            <i class="ph ph-calendar"></i>
+                        </div>
+                        <span>Collection</span>
+                    </div>
+                    <div class="grid-card" data-target="insurance-view">
+                        <div class="icon-circle icon-pink">
+                            <i class="ph ph-shield-check"></i>
+                        </div>
+                        <span>Shop Insurance</span>
+                    </div>
+                    <div class="grid-card" data-target="calculator-view">
+                        <div class="icon-circle icon-purple">
+                            <i class="ph ph-calculator"></i>
+                        </div>
+                        <span>Calculator</span>
+                    </div>
+                </div>
+
+                <div class="more-menu-list">
+                    <div class="menu-item">
+                        <div class="menu-left">
+                            <i class="ph ph-gear-six menu-icon"></i>
+                            <span>Settings</span>
+                        </div>
+                        <i class="ph ph-caret-right menu-arrow"></i>
+                    </div>
+                    <div class="menu-item">
+                        <div class="menu-left">
+                            <i class="ph ph-question menu-icon"></i>
+                            <span>Help & Support</span>
+                        </div>
+                        <i class="ph ph-caret-right menu-arrow"></i>
+                    </div>
+                </div>
+            </section>
+
+            <section id="cashbook-view" class="view hidden tab-content">
+                <div class="header-actions">
+                    <div>
+                        <h2>Daily Shop Cashbook</h2>
+                        <p class="text-secondary">Counter Cash Drawer Ledger</p>
+                    </div>
+                    <div class="ledger-header-actions">
+                        <button id="btn-cash-in" class="btn-primary">
+                            <i class="ph ph-arrow-down-left"></i> Cash In (+ Hand)
+                        </button>
+                        <button id="btn-cash-out" class="btn-secondary">
+                            <i class="ph ph-arrow-up-right"></i> Cash Out (- Expense)
+                        </button>
+                    </div>
+                </div>
+
+                <div class="summary-cards">
+                    <div class="card highlight-success">
+                        <h3>Total Cash In</h3>
+                        <p id="stat-cash-in" class="amount text-success">₹0.00</p>
+                    </div>
+                    <div class="card highlight-danger">
+                        <h3>Total Cash Out</h3>
+                        <p id="stat-cash-out" class="amount text-danger">₹0.00</p>
+                    </div>
+                    <div class="card highlight">
+                        <h3>Net Counter Balance</h3>
+                        <p id="stat-cash-net" class="amount">₹0.00</p>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Type</th>
+                                <th>Remarks / Notes</th>
+                                <th class="text-right">Cash In (+)</th>
+                                <th class="text-right">Cash Out (-)</th>
+                                <th class="text-right">Running Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cashbook-list-body">
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="bills-view" class="view hidden tab-content">
+                <div class="header-actions">
+                    <div>
+                        <h2>Bills & Invoices</h2>
+                        <p class="text-secondary">Billing Records and Sales Receipts</p>
+                    </div>
+                    <button id="btn-create-bill" class="btn-primary">
+                        <i class="ph ph-plus"></i> Create Bill
+                    </button>
+                </div>
+
+                <div class="summary-cards">
+                    <div class="card">
+                        <h3>Total Bills Issued</h3>
+                        <p id="stat-bill-count" class="amount">0</p>
+                    </div>
+                    <div class="card highlight-success">
+                        <h3>Total Billed Revenue</h3>
+                        <p id="stat-bill-total" class="amount text-success">₹0.00</p>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Invoice ID</th>
+                                <th>Customer Name</th>
+                                <th>Date</th>
+                                <th class="text-right">Items</th>
+                                <th class="text-right">Total Amount</th>
+                                <th class="text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bills-list-body">
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="items-view" class="view hidden tab-content">
+                <div class="header-actions">
+                    <div>
+                        <h2>Inventory Stock</h2>
+                        <p class="text-secondary">Track Store Items and Stock Levels</p>
+                    </div>
+                    <button id="btn-add-item" class="btn-primary">
+                        <i class="ph ph-plus"></i> Add Item
+                    </button>
+                </div>
+
+                <div class="summary-cards">
+                    <div class="card">
+                        <h3>Total Unique Items</h3>
+                        <p id="stat-item-count" class="amount">0</p>
+                    </div>
+                    <div class="card highlight-success">
+                        <h3>Total Stock Valuation (Cost)</h3>
+                        <p id="stat-item-valuation" class="amount text-success">₹0.00</p>
+                    </div>
+                    <div class="card highlight-danger">
+                        <h3>Re-order Alerts</h3>
+                        <p id="stat-item-reorder" class="amount text-danger">0</p>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Item Name</th>
+                                <th class="text-right">Stock Qty</th>
+                                <th class="text-right">Purchase Price</th>
+                                <th class="text-right">Selling Price</th>
+                                <th class="text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="items-list-body">
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="staff-view" class="view hidden tab-content">
+                <div class="section-placeholder">
+                    <div class="placeholder-icon icon-yellow"><i class="ph ph-user-plus"></i></div>
+                    <h2>Staff Management</h2>
+                    <p class="text-secondary">Staff management and attendance details will appear here.</p>
+                </div>
+            </section>
+
+            <section id="collection-view" class="view hidden tab-content">
+                <div class="section-placeholder">
+                    <div class="placeholder-icon icon-orange"><i class="ph ph-calendar"></i></div>
+                    <h2>Collection Schedule</h2>
+                    <p class="text-secondary">Payment collections and schedules will appear here.</p>
+                </div>
+            </section>
+
+            <section id="insurance-view" class="view hidden tab-content">
+                <div class="header-actions">
+                    <div>
+                        <h2>Shop Insurance</h2>
+                        <p class="text-secondary">Policy & Renewal Information</p>
+                    </div>
+                    <button id="btn-edit-insurance" class="btn-primary">
+                        <i class="ph ph-pencil-simple"></i> Edit Policy
+                    </button>
+                </div>
+
+                <div class="insurance-card">
+                    <div class="insurance-card-header">
+                        <div class="insurance-badge-wrapper">
+                            <i class="ph ph-shield-check ins-card-icon"></i>
+                            <span id="ins-status-badge" class="status-badge status-active">Active Policy</span>
+                        </div>
+                        <h3 id="display-ins-name">Policy Name Not Set</h3>
+                        <p id="display-ins-provider" class="text-secondary">Provider: Not specified</p>
+                    </div>
+
+                    <div class="insurance-card-details">
+                        <div class="ins-detail-box">
+                            <label>Annual Premium</label>
+                            <p id="display-ins-premium" class="amount">₹0.00</p>
+                        </div>
+                        <div class="ins-detail-box">
+                            <label>Next Renewal Date</label>
+                            <p id="display-ins-renewal" class="date-text">Not Set</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="ledger-view" class="view hidden">
+                <div class="ledger-header">
+                    <button id="btn-back" class="btn-secondary">
+                        <i class="ph ph-arrow-left"></i> Back
+                    </button>
+                    <h2 id="ledger-customer-name">Customer Name</h2>
+                    <div class="ledger-header-actions">
+                        <button id="btn-whatsapp" class="btn-whatsapp">
+                            <i class="ph ph-whatsapp-logo"></i> Reminder
+                        </button>
+                        <button id="btn-download-pdf" class="btn-outline">
+                            <i class="ph ph-download-simple"></i> Statement
+                        </button>
+                    </div>
+                </div>
+
+                <div class="summary-cards">
+                    <div class="card">
+                        <h3>Current Principal</h3>
+                        <p id="summary-principal" class="amount">₹0.00</p>
+                    </div>
+                    <div class="card">
+                        <h3>Accrued Interest</h3>
+                        <p id="summary-interest" class="amount text-danger">₹0.00</p>
+                    </div>
+                    <div class="card highlight">
+                        <h3>Total Net Balance</h3>
+                        <p id="summary-net" class="amount">₹0.00</p>
+                    </div>
+                </div>
+
+                <div class="ledger-actions">
+                    <button id="btn-add-transaction" class="btn-primary">
+                        <i class="ph ph-receipt"></i> Add Transaction
+                    </button>
+                </div>
+
+                <div class="transaction-list-container">
+                    <table id="transaction-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Remarks</th>
+                                <th class="text-right">Debit (-)</th>
+                                <th class="text-right">Credit (+)</th>
+                                <th class="text-right">Running Principal</th>
+                                <th class="text-right">Accrued Interest</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transaction-list-body">
+                            </tbody>
+                    </table>
+                </div>
+            </section>
+            <section id="reports-view" class="view hidden tab-content">
+                <div class="reports-header-bar">
+                    <button class="btn-icon" data-target="dashboard-view" aria-label="Go Back">
+                        <i class="ph ph-arrow-left"></i>
+                    </button>
+                    <h2>View Reports</h2>
+                </div>
+
+                <div class="report-tabs-bar">
+                    <button class="report-tab-btn active" data-report-category="all">All</button>
+                    <button class="report-tab-btn" data-report-category="customer">Customer</button>
+                    <button class="report-tab-btn" data-report-category="bills">Bills</button>
+                    <button class="report-tab-btn" data-report-category="gst">GST</button>
+                    <button class="report-tab-btn" data-report-category="daywise">Day-wise</button>
+                </div>
+
+                <div class="report-cards-container">
+                    <div class="report-group-card" data-category-group="customer">
+                        <h3 class="report-group-title">Customer Reports</h3>
+                        
+                        <div class="report-item-row" id="report-customer-txns">
+                            <div class="report-item-left">
+                                <div class="report-icon-box blue-icon">
+                                    <i class="ph ph-file-text"></i>
+                                </div>
+                                <div class="report-item-info">
+                                    <h4>Customer Transactions report</h4>
+                                    <p class="text-secondary">Summary of all customer transactions</p>
+                                </div>
+                            </div>
+                            <i class="ph ph-caret-right report-item-arrow"></i>
+                        </div>
+
+                        <div class="report-item-row" id="report-customer-pdf">
+                            <div class="report-item-left">
+                                <div class="report-icon-box blue-icon">
+                                    <i class="ph ph-file-pdf"></i>
+                                </div>
+                                <div class="report-item-info">
+                                    <h4>Customer list pdf</h4>
+                                    <p class="text-secondary">List of all Customers</p>
+                                </div>
+                            </div>
+                            <i class="ph ph-caret-right report-item-arrow"></i>
+                        </div>
+                    </div>
+
+                    <div class="report-group-card" data-category-group="bills">
+                        <h3 class="report-group-title">Bills Reports</h3>
+
+                        <div class="report-item-row" id="report-sales-summary">
+                            <div class="report-item-left">
+                                <div class="report-icon-box green-icon">
+                                    <i class="ph ph-receipt"></i>
+                                </div>
+                                <div class="report-item-info">
+                                    <h4>Bills & Sales Summary</h4>
+                                    <p class="text-secondary">Comprehensive shop sales report</p>
+                                </div>
+                            </div>
+                            <i class="ph ph-caret-right report-item-arrow"></i>
+                        </div>
+                    </div>
+
+                    <div class="report-group-card" data-category-group="gst">
+                        <h3 class="report-group-title">GST & Tax Reports</h3>
+
+                        <div class="report-item-row" id="report-gst-summary">
+                            <div class="report-item-left">
+                                <div class="report-icon-box purple-icon">
+                                    <i class="ph ph-percent"></i>
+                                </div>
+                                <div class="report-item-info">
+                                    <h4>GST Tax Computation</h4>
+                                    <p class="text-secondary">Estimated tax summary for filing</p>
+                                </div>
+                            </div>
+                            <i class="ph ph-caret-right report-item-arrow"></i>
+                        </div>
+                    </div>
+
+                    <div class="report-group-card" data-category-group="daywise">
+                        <h3 class="report-group-title">Day-wise Reports</h3>
+
+                        <div class="report-item-row" id="report-cashbook-summary">
+                            <div class="report-item-left">
+                                <div class="report-icon-box orange-icon">
+                                    <i class="ph ph-calendar-blank"></i>
+                                </div>
+                                <div class="report-item-info">
+                                    <h4>Day-wise Cashbook Summary</h4>
+                                    <p class="text-secondary">Daily counter cash drawer log</p>
+                                </div>
+                            </div>
+                            <i class="ph ph-caret-right report-item-arrow"></i>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="calculator-view" class="view hidden tab-content">
+                <div class="header-actions" style="margin-bottom: 16px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <button class="btn-icon" data-target="dashboard-view" aria-label="Go Back">
+                            <i class="ph ph-arrow-left"></i>
+                        </button>
+                        <div>
+                            <h2 style="margin: 0; font-size: 1.3rem;">Interest Calculator</h2>
+                            <p class="text-secondary" style="margin: 0; font-size: 0.85rem;">Compute loan & deposit interest schedule</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom: 24px; border-radius: 12px; padding: 20px;">
+                    <form id="standalone-calc-form" onsubmit="return false;">
+                        <!-- Principal Amount -->
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="calc-amount" style="font-weight: 600;">Amount (₹)</label>
+                            <input type="number" id="calc-amount" placeholder="Enter principal amount (e.g. 10000)" step="any" min="0" required style="font-size: 1.1rem; padding: 12px;">
+                        </div>
+
+                        <!-- Interest Rate and Unit -->
+                        <div class="form-group-row" style="margin-bottom: 16px;">
+                            <div class="form-group">
+                                <label for="calc-rate" style="font-weight: 600;">Interest Rate</label>
+                                <input type="number" id="calc-rate" placeholder="e.g. 12" step="any" min="0" required style="padding: 10px;">
+                            </div>
+                            <div class="form-group">
+                                <label for="calc-rate-unit" style="font-weight: 600;">Rate Unit</label>
+                                <select id="calc-rate-unit" style="padding: 10px;">
+                                    <option value="year" selected>% / Year</option>
+                                    <option value="month">% / Month</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Compounding Frequency -->
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label for="calc-compounding" style="font-weight: 600;">Compounding</label>
+                            <select id="calc-compounding" style="padding: 10px;">
+                                <option value="none" selected>No Compounding (Simple)</option>
+                                <option value="monthly">Monthly</option>
+                                <option value="quarterly">Quarterly</option>
+                                <option value="half_yearly">Half-Yearly</option>
+                                <option value="yearly">Yearly</option>
+                                <option value="custom">Custom Days</option>
+                            </select>
+                            <small id="calc-compounding-hint" class="text-secondary" style="margin-top: 6px; display: inline-flex; align-items: center; gap: 4px;">
+                                <i class="ph ph-info"></i> Principal amount stays the same
+                            </small>
+                        </div>
+
+                        <!-- Custom Days Input (Hidden unless Custom Compounding) -->
+                        <div class="form-group hidden" id="calc-custom-days-group" style="margin-bottom: 16px;">
+                            <label for="calc-custom-days" style="font-weight: 600;">Compounding Frequency (Days)</label>
+                            <input type="number" id="calc-custom-days" placeholder="e.g. 30 or 90" min="1">
+                        </div>
+
+                        <!-- Time Period Section -->
+                        <div class="form-group" style="margin-bottom: 16px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px;">
+                            <label style="font-weight: 700; color: var(--text-primary); margin-bottom: 12px; display: block;">Time Period</label>
+                            
+                            <div style="display: flex; gap: 24px; margin-bottom: 14px;">
+                                <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600;">
+                                    <input type="radio" name="calc-time-mode" value="dates" checked id="calc-time-mode-dates">
+                                    Dates
+                                </label>
+                                <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600;">
+                                    <input type="radio" name="calc-time-mode" value="duration" id="calc-time-mode-duration">
+                                    Duration
+                                </label>
+                            </div>
+
+                            <!-- Mode 1: Dates -->
+                            <div id="calc-dates-container" class="form-group-row">
+                                <div class="form-group">
+                                    <label for="calc-from-date">From</label>
+                                    <input type="date" id="calc-from-date">
+                                </div>
+                                <div class="form-group">
+                                    <label for="calc-to-date">To</label>
+                                    <input type="date" id="calc-to-date">
+                                </div>
+                            </div>
+
+                            <!-- Mode 2: Duration -->
+                            <div id="calc-duration-container" class="form-group-row hidden">
+                                <div class="form-group">
+                                    <label for="calc-years">Years</label>
+                                    <input type="number" id="calc-years" placeholder="0" min="0" value="0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="calc-months">Months</label>
+                                    <input type="number" id="calc-months" placeholder="0" min="0" value="0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="calc-days">Days</label>
+                                    <input type="number" id="calc-days" placeholder="0" min="0" value="0">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Calculation Type Section -->
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label style="font-weight: 700; color: var(--text-primary); margin-bottom: 10px; display: block;">Calculation Type</label>
+                            <div class="calc-type-cards-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                                <div class="calc-type-card active" id="calc-type-total-days" data-calc-type="total_days" style="border: 2px solid var(--border-color); border-radius: 8px; padding: 14px; cursor: pointer; transition: all 0.2s;">
+                                    <h4 style="margin: 0 0 4px 0; font-size: 0.95rem;">Total Days</h4>
+                                    <p class="text-secondary" style="margin: 0; font-size: 0.75rem;">total days / 30 (or / 365)</p>
+                                </div>
+                                <div class="calc-type-card" id="calc-type-date-to-date" data-calc-type="date_to_date" style="border: 2px solid var(--border-color); border-radius: 8px; padding: 14px; cursor: pointer; transition: all 0.2s;">
+                                    <h4 style="margin: 0 0 4px 0; font-size: 0.95rem;">Date-to-Date</h4>
+                                    <p class="text-secondary" style="margin: 0; font-size: 0.75rem;">full months + (remaining days / 30)</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Submit and Reset Buttons -->
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <button type="button" id="btn-calc-submit" class="btn-primary full-width" style="margin-top: 0; padding: 14px; font-size: 1rem; font-weight: 700;">
+                                Calculate
+                            </button>
+                            <button type="button" id="btn-calc-reset" class="btn-secondary full-width" style="margin-top: 0; padding: 12px; font-size: 0.9rem; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                                <i class="ph ph-arrow-counter-clockwise"></i> Reset Calculation
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Results Output Card -->
+                <div class="card" id="calc-results-card" style="border-radius: 12px; padding: 20px; background-color: var(--surface-color);">
+                    <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 1rem; font-weight: 700; color: var(--text-primary);">Calculation Summary</h3>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 14px; margin-bottom: 14px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span class="text-secondary" style="font-weight: 500;">Principle Amount</span>
+                            <span id="calc-res-principal" style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary);">--</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span class="text-secondary" style="font-weight: 500;">Interest Amount</span>
+                            <span id="calc-res-interest" style="font-size: 1.1rem; font-weight: 700; color: var(--debit-accent);">--</span>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary);">Total</span>
+                        <span id="calc-res-total" style="font-size: 1.4rem; font-weight: 800; color: var(--credit-accent);">--</span>
+                    </div>
+
+                    <div id="calc-res-breakdown" class="text-secondary" style="margin-top: 16px; font-size: 0.8rem; line-height: 1.5; background: var(--bg-color); padding: 10px 14px; border-radius: 6px;">
+                        Enter details above and click Calculate to view full breakdown.
+                    </div>
+                </div>
+            </section>
+        </main>
+        
+        <footer class="app-footer">
+            <p>Built by Arham | Version 1.2</p>
+        </footer>
+
+        <nav class="bottom-nav">
+            <button class="bottom-nav-item active" data-target="dashboard-view">
+                <i class="ph ph-users"></i>
+                <span>Parties</span>
+            </button>
+            <button class="bottom-nav-item" data-target="bills-view">
+                <i class="ph ph-receipt"></i>
+                <span>Bills</span>
+            </button>
+            <button class="bottom-nav-item" data-target="items-view">
+                <i class="ph ph-package"></i>
+                <span>Items</span>
+            </button>
+            <button class="bottom-nav-item" data-target="calculator-view">
+                <i class="ph ph-calculator"></i>
+                <span>Calculator</span>
+            </button>
+            <button class="bottom-nav-item" data-target="reports-view">
+                <i class="ph ph-chart-line-up"></i>
+                <span>Reports</span>
+            </button>
+            <button class="bottom-nav-item" data-target="more-view">
+                <i class="ph ph-dots-three-circle"></i>
+                <span>More</span>
+            </button>
+        </nav>
+    </div>
+
+    <div id="customer-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Customer Settings</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <form id="customer-form">
+                <input type="hidden" id="cust-id">
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="cust-name" required>
+                </div>
+                <div class="form-group">
+                    <label>Phone</label>
+                    <input type="tel" id="cust-phone" required>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label>Lending Interest (%) / yr</label>
+                        <input type="number" id="cust-lend-rate" step="0.1" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Deposit Interest (%) / yr</label>
+                        <input type="number" id="cust-dep-rate" step="0.1" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn-primary full-width">Save Customer</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="transaction-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Log Entry</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <form id="transaction-form">
+                <div class="form-group">
+                    <label>Date</label>
+                    <input type="date" id="txn-date" required>
+                </div>
+                <div class="form-group schedule-builder-section">
+                    <div class="schedule-builder-header">
+                        <label class="schedule-builder-label"><i class="ph ph-percent"></i> Interest Schedule Builder</label>
+                    </div>
+                    <div id="interest-schedule-container" class="interest-schedule-container">
+                        <!-- Dynamic Phase Cards Rendered via JS -->
+                    </div>
+                    <button type="button" id="btn-add-phase" class="btn-add-phase-btn">
+                        <i class="ph ph-plus-circle"></i> + Add Next Phase
+                    </button>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label>Type</label>
+                        <select id="txn-type" required>
+                            <option value="debit">Debit (You Gave)</option>
+                            <option value="credit">Credit (You Received)</option>
+                            <option value="waiver">Interest Waiver (Forgiven)</option>
+                            <option value="adjustment">Principal Adjustment (Reduce Debt)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Category</label>
+                        <select id="txn-category" required>
+                            <option value="Cash">Cash</option>
+                            <option value="Goods/Grocery">Goods / Grocery</option>
+                            <option value="Grain">Grain / Wholesale</option>
+                            <option value="System">System / Audit</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Amount (₹)</label>
+                    <input type="number" id="txn-amount" step="0.01" min="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label>Remarks / Audit Note</label>
+                    <input type="text" id="txn-remarks" placeholder="e.g. 5 bags wheat or Audit correction" required>
+                </div>
+                <button type="submit" class="btn-primary full-width">Commit Transaction</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Item Modal -->
+    <div id="item-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add / Edit Inventory Item</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <form id="item-form">
+                <input type="hidden" id="item-id">
+                <div class="form-group">
+                    <label>Item Name</label>
+                    <input type="text" id="item-name" placeholder="e.g. Fortune Oil 1L" required>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label>Stock Quantity</label>
+                        <input type="number" id="item-qty" min="0" placeholder="e.g. 50" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Min Re-order Threshold</label>
+                        <input type="number" id="item-min-qty" min="0" value="5" placeholder="e.g. 5" required>
+                    </div>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label>Purchase Price (₹)</label>
+                        <input type="number" id="item-buy-price" step="0.01" min="0" placeholder="120.00" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Selling Price (₹)</label>
+                        <input type="number" id="item-sell-price" step="0.01" min="0" placeholder="135.00" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn-primary full-width">Save Item</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Bill Modal -->
+    <div id="bill-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 650px;">
+            <div class="modal-header">
+                <h3>Create New Bill</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <form id="bill-form">
+                <div class="form-group-row">
+                    <div class="form-group" style="flex: 1.5;">
+                        <label>Customer Name</label>
+                        <input type="text" id="bill-customer-name" placeholder="Walk-in Customer" required>
+                    </div>
+                    <div class="form-group" style="flex: 1.5;">
+                        <label>Link Customer Account (Credit)</label>
+                        <select id="bill-customer-select">
+                            <option value="">-- Walk-in (No Ledger Credit) --</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group-row" style="align-items: flex-end;">
+                    <div class="form-group" style="flex: 2;">
+                        <label>Select Item from Stock</label>
+                        <select id="bill-select-item">
+                            <option value="">-- Choose Stock Item --</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label>Quantity</label>
+                        <input type="number" id="bill-item-qty" min="1" value="1">
+                    </div>
+                    <button type="button" id="btn-add-bill-item" class="btn-secondary" style="margin-bottom: 16px;">Add Item</button>
+                </div>
+
+                <div class="bill-items-list-container" style="margin: 12px 0;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th class="text-right">Qty</th>
+                                <th class="text-right">Price</th>
+                                <th class="text-right">Total</th>
+                                <th class="text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bill-items-body">
+                            <tr><td colspan="5" class="text-center text-secondary">No items added yet.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="form-group-row" style="margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 12px;">
+                    <div class="form-group">
+                        <label>Payment Mode</label>
+                        <select id="bill-payment-mode">
+                            <option value="CASH">Full Cash Paid</option>
+                            <option value="CREDIT">Full Credit Sale</option>
+                            <option value="PARTIAL">Partial Cash / Partial Credit</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Cash Paid Amount (₹)</label>
+                        <input type="number" id="bill-paid-amount" step="0.01" min="0" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Ledger Credit (₹)</label>
+                        <input type="number" id="bill-credit-balance" step="0.01" min="0" placeholder="0.00" readonly style="background-color: var(--surface-color); opacity: 0.85;">
+                    </div>
+                </div>
+
+                <div class="bill-summary-row" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; font-weight: 600;">
+                    <span>Grand Total:</span>
+                    <span id="bill-grand-total" class="amount text-success" style="font-size: 1.4rem;">₹0.00</span>
+                </div>
+
+                <button type="submit" class="btn-primary full-width">Finalize & Issue Bill</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Cashbook Modal -->
+    <div id="cashbook-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="cashbook-modal-title">Log Cashbook Entry</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <form id="cashbook-form">
+                <input type="hidden" id="cashbook-type" value="in">
+                <div class="form-group">
+                    <label>Date</label>
+                    <input type="date" id="cashbook-date" required>
+                </div>
+                <div class="form-group">
+                    <label>Amount (₹)</label>
+                    <input type="number" id="cashbook-amount" step="0.01" min="0.01" placeholder="e.g. 500.00" required>
+                </div>
+                <div class="form-group">
+                    <label>Remarks / Note</label>
+                    <input type="text" id="cashbook-remarks" placeholder="e.g. Counter Cash Sale, Tea/Refreshment expense" required>
+                </div>
+                <button type="submit" id="btn-submit-cashbook" class="btn-primary full-width">Save Cashbook Entry</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Insurance Modal -->
+    <div id="insurance-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Update Shop Insurance Policy</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <form id="insurance-form">
+                <div class="form-group">
+                    <label>Policy Name</label>
+                    <input type="text" id="ins-name" placeholder="e.g. Shopkeeper Suraksha Cover" required>
+                </div>
+                <div class="form-group">
+                    <label>Insurance Provider</label>
+                    <input type="text" id="ins-provider" placeholder="e.g. HDFC ERGO General Insurance" required>
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label>Annual Premium (₹)</label>
+                        <input type="number" id="ins-premium" step="0.01" min="0" placeholder="e.g. 4500.00" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Renewal Date</label>
+                        <input type="date" id="ins-renewal-date" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn-primary full-width">Save Policy Details</button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Void / Reverse Modal -->
+    <div id="void-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Void / Reverse Record</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <form id="void-form">
+                <input type="hidden" id="void-target-type">
+                <input type="hidden" id="void-target-id">
+                <p class="text-secondary" style="margin-bottom: 16px; font-size: 0.875rem; line-height: 1.4;">This action will mark the record as <strong>VOID</strong> for compliance audit trail requirements and reverse its financial & inventory impact.</p>
+                <div class="form-group">
+                    <label>Reason for Reversal / Void</label>
+                    <input type="text" id="void-reason" placeholder="e.g. Customer returned goods, Billing entry error" required>
+                </div>
+                <button type="submit" class="btn-primary full-width" style="background-color: var(--debit-accent); color: #fff;">Confirm Void Reversal</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="api.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
