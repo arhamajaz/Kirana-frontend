@@ -714,7 +714,26 @@ document.getElementById('btn-download-pdf')?.addEventListener('click', () => {
     doc.save(`Ledger_Statement_${customer.name.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`);
 });
 
-document.getElementById('search-input').addEventListener('input', (e) => renderDashboard(e.target.value));
+let searchDebounceTimer = null;
+document.getElementById('search-input').addEventListener('input', (e) => {
+    const searchTerm = e.target.value;
+    renderDashboard(searchTerm);
+
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(async () => {
+        if (state.isAuthenticated && LedgerAPI.getToken()) {
+            try {
+                const searchRes = await LedgerAPI.searchCustomers(searchTerm);
+                if (Array.isArray(searchRes?.customers)) {
+                    state.customers = searchRes.customers;
+                    renderDashboard(searchTerm);
+                }
+            } catch (err) {
+                console.warn("Backend search failed, using local search:", err);
+            }
+        }
+    }, 300);
+});
 
 // New Customer Form
 document.getElementById('btn-new-customer').onclick = () => {
@@ -1311,6 +1330,18 @@ async function showDashboard() {
 
 // --- SESSION CHECK ---
 function checkSession() {
+    LedgerAPI.setUnauthorizedHandler(() => {
+        state.isAuthenticated = false;
+        document.getElementById('app-wrapper').classList.add('hidden');
+        document.getElementById('auth-view').classList.remove('hidden');
+        document.getElementById('auth-view').classList.add('active');
+        const errorEl = document.getElementById('login-error');
+        if (errorEl) {
+            errorEl.textContent = 'Session expired or token invalid. Please log in again.';
+            errorEl.classList.remove('hidden');
+        }
+    });
+
     const token = LedgerAPI.getToken();
     if (token) {
         state.isAuthenticated = true;

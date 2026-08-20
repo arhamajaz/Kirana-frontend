@@ -1,52 +1,65 @@
 /**
  * Malwa Ledger Pro - API Layer
  * 
- * This file serves as the centralized communication layer between the frontend
- * and the backend API. It encapsulates all request configurations, headers,
- * query parameters, authentication headers, error handling, and JSON parsing.
+ * Centralized communication layer between frontend and backend API.
+ * Encapsulates BASE_URL, authentication headers, request sanitization,
+ * error handling, 401 interceptors, and response parsing.
  */
 
-// 1. Immutable BASE_URL configuration
+// 1. Dynamic BASE_URL configuration
 const API = Object.freeze({
-    BASE_URL: "http://localhost:3000/api/v1"
+    BASE_URL: window.ENV?.API_BASE_URL || "http://localhost:3000/api/v1"
 });
 
 const TOKEN_KEY = "ml_pro_jwt_token";
 
-// --- JWT TOKEN MANAGEMENT HELPERS ---
+// --- 401 UNAUTHORIZED INTERCEPTOR CALLBACK ---
+let onUnauthorizedCallback = null;
 
-/**
- * Saves the JWT token to local storage.
- * @param {string} token - The JWT token to save.
- */
+function setUnauthorizedHandler(fn) {
+    if (typeof fn === 'function') {
+        onUnauthorizedCallback = fn;
+    }
+}
+
+// --- JWT TOKEN MANAGEMENT HELPERS ---
 function saveToken(token) {
     localStorage.setItem(TOKEN_KEY, token);
 }
 
-/**
- * Retrieves the JWT token from local storage.
- * @returns {string|null} The stored JWT token, or null if it doesn't exist.
- */
 function getToken() {
     return localStorage.getItem(TOKEN_KEY);
 }
 
-/**
- * Removes the JWT token from local storage.
- */
 function removeToken() {
     localStorage.removeItem(TOKEN_KEY);
 }
 
-// --- PRIVATE HELPERS ---
+// --- INPUT SANITIZATION HELPERS (ZOD ALIGNMENT) ---
+/**
+ * Strips non-digits to ensure a strict 10-digit phone number string.
+ */
+function sanitizePhoneNumber(phone) {
+    if (!phone) return "";
+    return String(phone).replace(/\D/g, "");
+}
 
 /**
- * Converts a params object into a standard query string.
- * Uses URLSearchParams to prevent manual string concatenation.
- * 
- * @param {Object} params - Key-value parameters.
- * @returns {string} The query string starting with '?' or an empty string.
+ * Ensures number formatting and decimal constraints.
  */
+function sanitizeRate(val) {
+    const num = parseFloat(val);
+    if (isNaN(num)) return 0;
+    return Math.min(Math.max(Number(num.toFixed(2)), 0), 100);
+}
+
+function sanitizeAmount(val) {
+    const num = parseFloat(val);
+    if (isNaN(num) || num <= 0) return 0;
+    return Number(num.toFixed(2));
+}
+
+// --- PRIVATE HELPERS ---
 function buildQuery(params) {
     if (!params || Object.keys(params).length === 0) {
         return "";
@@ -61,13 +74,6 @@ function buildQuery(params) {
     return queryString ? `?${queryString}` : "";
 }
 
-/**
- * Builds request headers. Attaches Content-Type and Authorization token automatically
- * if the endpoint is authenticated.
- * 
- * @param {boolean} authenticated - True if the endpoint requires a JWT token.
- * @returns {Object} Request headers object.
- */
 function buildHeaders(authenticated = false) {
     const headers = {
         "Content-Type": "application/json"
@@ -85,13 +91,6 @@ function buildHeaders(authenticated = false) {
 
 /**
  * Reusable generic request helper.
- * Handles fetch, parses response JSON, handles HTTP status codes, and returns data.
- * 
- * @param {string} method - HTTP Method (e.g. 'GET', 'POST', 'PATCH', 'DELETE').
- * @param {string} endpoint - API Endpoint relative to BASE_URL (or absolute URL).
- * @param {Object|null} body - Request payload body.
- * @param {boolean} authenticated - True if request needs authorization header.
- * @returns {Promise<any>} The parsed response data object (usually response.data).
  */
 async function request(method, endpoint, body = null, authenticated = false) {
     const url = endpoint.startsWith("http") ? endpoint : `${API.BASE_URL}${endpoint}`;
@@ -110,7 +109,7 @@ async function request(method, endpoint, body = null, authenticated = false) {
         response = await fetch(url, config);
     } catch (networkError) {
         console.error("Fetch Network Error:", networkError);
-        throw new Error("Network error: Please check your internet connection.");
+        throw new Error("Network error: Please check if backend server is running at " + API.BASE_URL);
     }
 
     let responseData = null;
@@ -123,203 +122,286 @@ async function request(method, endpoint, body = null, authenticated = false) {
         }
     }
 
+    // 401 Interceptor: Token expired or invalid
+    if (response.status === 401) {
+        removeToken();
+        if (onUnauthorizedCallback) {
+            onUnauthorizedCallback();
+        }
+    }
+
     if (!response.ok) {
-        const message = (responseData && responseData.message) || `HTTP Error ${response.status}: ${response.statusText}`;
+        let message = responseData && responseData.message;
+        
+        // Parse Zod structured errors if present
+        if (responseData && responseData.errors && Array.isArray(responseData.errors)) {
+            const detailMsgs = responseData.errors.map(err => err.message || err.path?.join('.')).join("; ");
+            if (detailMsgs) message = `${message ? message + ": " : ""}${detailMsgs}`;
+        }
+
+        if (!message) {
+            message = `HTTP Error ${response.status}: ${response.statusText}`;
+        }
+
         const error = new Error(message);
         error.status = response.status;
         error.data = responseData;
         throw error;
     }
 
-    // Standard response format contains `{ status: "success", data: ... }`.
-    // Automatically return responseData.data if it exists, otherwise responseData.
     return responseData && responseData.hasOwnProperty("data") ? responseData.data : responseData;
 }
 
 // --- PUBLIC API METHODS ---
 
-/**
- * Handles merchant login.
- * @param {string} email - Merchant email address.
- * @param {string} password - Merchant password.
- * @returns {Promise<Object>} The login response data (containing token).
- */
 async function login(email, password) {
-    return request("POST", "/auth/login", { email, password }, false);
+    return request("POST", "/auth/login", { 
+        email: email ? String(email).trim().toLowerCase() : "", 
+        password: password ? String(password) : "" 
+    }, false);
 }
 
-/**
- * Retrieves a list of customers with optional filters and pagination.
- * @param {Object} params - Query parameters (search/q, page, limit, sort, order).
- * @returns {Promise<Array>} List of customer objects.
- */
 async function getCustomers(params) {
     return request("GET", `/customers${buildQuery(params)}`, null, true);
 }
 
-/**
- * Creates a new customer record.
- * @param {Object} customerData - Customer details.
- * @returns {Promise<Object>} The created customer object.
- */
+async function searchCustomers(query, params = {}) {
+    return request("GET", `/customers/search${buildQuery({ q: query, ...params })}`, null, true);
+}
+
 async function createCustomer(customerData) {
-    return request("POST", "/customers", customerData, true);
+    const payload = {
+        name: customerData.name ? String(customerData.name).trim() : "",
+        phoneNumber: sanitizePhoneNumber(customerData.phoneNumber),
+        lendingRate: sanitizeRate(customerData.lendingRate),
+        depositRate: sanitizeRate(customerData.depositRate),
+        defaultInterestType: customerData.defaultInterestType ? String(customerData.defaultInterestType).toUpperCase() : "SIMPLE",
+        compoundingFrequency: customerData.compoundingFrequency ? String(customerData.compoundingFrequency).toUpperCase() : "MONTHLY"
+    };
+
+    if (payload.compoundingFrequency === "CUSTOM" && customerData.customCompoundDays) {
+        payload.customCompoundDays = parseInt(customerData.customCompoundDays, 10);
+    }
+
+    return request("POST", "/customers", payload, true);
 }
 
-/**
- * Updates an existing customer's details.
- * @param {string} id - Customer ID.
- * @param {Object} customerData - Updated fields.
- * @returns {Promise<Object>} The updated customer object.
- */
 async function updateCustomer(id, customerData) {
-    return request("PATCH", `/customers/${id}`, customerData, true);
+    const payload = {};
+    if (customerData.name !== undefined) payload.name = String(customerData.name).trim();
+    if (customerData.phoneNumber !== undefined) payload.phoneNumber = sanitizePhoneNumber(customerData.phoneNumber);
+    if (customerData.lendingRate !== undefined) payload.lendingRate = sanitizeRate(customerData.lendingRate);
+    if (customerData.depositRate !== undefined) payload.depositRate = sanitizeRate(customerData.depositRate);
+    if (customerData.defaultInterestType !== undefined) payload.defaultInterestType = String(customerData.defaultInterestType).toUpperCase();
+    if (customerData.compoundingFrequency !== undefined) payload.compoundingFrequency = String(customerData.compoundingFrequency).toUpperCase();
+    if (payload.compoundingFrequency === "CUSTOM" && customerData.customCompoundDays) {
+        payload.customCompoundDays = parseInt(customerData.customCompoundDays, 10);
+    }
+
+    return request("PATCH", `/customers/${id}`, payload, true);
 }
 
-/**
- * Deletes a customer by ID.
- * @param {string} id - Customer ID.
- * @returns {Promise<Object>} Deletion result confirmation.
- */
 async function deleteCustomer(id) {
     return request("DELETE", `/customers/${id}`, null, true);
 }
 
-/**
- * Creates a new transaction.
- * @param {Object} transactionData - Transaction details.
- * @returns {Promise<Object>} The created transaction object.
- */
 async function createTransaction(transactionData) {
-    return request("POST", "/transactions", transactionData, true);
+    const type = String(transactionData.type).toUpperCase();
+    
+    const payload = {
+        customerId: transactionData.customerId,
+        type: type,
+        amount: sanitizeAmount(transactionData.amount),
+        date: transactionData.date || new Date().toISOString(),
+        interestStartDate: transactionData.interestStartDate || transactionData.date || new Date().toISOString()
+    };
+
+    if (transactionData.remarks) {
+        payload.remarks = String(transactionData.remarks).trim();
+    }
+
+    if (type === "DEBIT") {
+        if (transactionData.interestType) payload.interestType = String(transactionData.interestType).toUpperCase();
+        if (transactionData.interestRate !== undefined) payload.interestRate = sanitizeRate(transactionData.interestRate);
+        if (transactionData.compoundingFrequency) payload.compoundingFrequency = String(transactionData.compoundingFrequency).toUpperCase();
+        if (payload.compoundingFrequency === "CUSTOM" && transactionData.customCompoundDays) {
+            payload.customCompoundDays = parseInt(transactionData.customCompoundDays, 10);
+        }
+        if (transactionData.dueDate) payload.dueDate = transactionData.dueDate;
+    } else if (type === "CREDIT") {
+        // Zod strict rule: Omit interest parameters for CREDIT transactions
+        if (transactionData.targetEntryId) {
+            payload.targetEntryId = transactionData.targetEntryId;
+        }
+    }
+
+    return request("POST", "/transactions", payload, true);
 }
 
-/**
- * Retrieves ledger calculations for a specific customer.
- * @param {string} customerId - The customer ID.
- * @param {Object} params - Optional calculation date query param.
- * @returns {Promise<Object>} Ledger data including summary balances and transactions.
- */
 async function getCustomerLedger(customerId, params) {
     return request("GET", `/customers/${customerId}/ledger${buildQuery(params)}`, null, true);
 }
 
-/**
- * Checks server health status.
- * @returns {Promise<Object>} Health check status information.
- */
+async function getCustomerTransactions(customerId, params) {
+    return request("GET", `/customers/${customerId}/transactions${buildQuery(params)}`, null, true);
+}
+
+// Void transaction endpoint aligned to PATCH /transactions/:id/void
+async function voidTransaction(id, reasonData = {}) {
+    return request("PATCH", `/transactions/${id}/void`, reasonData, true);
+}
+
 async function healthCheck() {
     const serverUrl = API.BASE_URL.replace("/api/v1", "");
     return request("GET", `${serverUrl}/health`, null, false);
 }
 
-/**
- * Retrieves inventory items.
- */
+// --- FALLBACK MOCK WRAPPERS FOR UNIMPLEMENTED BACKEND ENDPOINTS ---
+
 async function getItems(params) {
-    return request("GET", `/items${buildQuery(params)}`, null, true);
+    try {
+        return await request("GET", `/items${buildQuery(params)}`, null, true);
+    } catch {
+        return JSON.parse(localStorage.getItem('ml_pro_items')) || [];
+    }
 }
 
-/**
- * Creates a new inventory item.
- */
 async function createItem(itemData) {
-    return request("POST", "/items", itemData, true);
+    try {
+        return await request("POST", "/items", itemData, true);
+    } catch {
+        const items = JSON.parse(localStorage.getItem('ml_pro_items')) || [];
+        const newItem = { id: 'item-' + Date.now(), ...itemData };
+        items.push(newItem);
+        localStorage.setItem('ml_pro_items', JSON.stringify(items));
+        return newItem;
+    }
 }
 
-/**
- * Updates an inventory item.
- */
 async function updateItem(id, itemData) {
-    return request("PATCH", `/items/${id}`, itemData, true);
+    try {
+        return await request("PATCH", `/items/${id}`, itemData, true);
+    } catch {
+        const items = JSON.parse(localStorage.getItem('ml_pro_items')) || [];
+        const idx = items.findIndex(i => i.id === id);
+        if (idx !== -1) items[idx] = { ...items[idx], ...itemData };
+        localStorage.setItem('ml_pro_items', JSON.stringify(items));
+        return items[idx];
+    }
 }
 
-/**
- * Deletes an inventory item.
- */
 async function deleteItem(id) {
-    return request("DELETE", `/items/${id}`, null, true);
+    try {
+        return await request("DELETE", `/items/${id}`, null, true);
+    } catch {
+        let items = JSON.parse(localStorage.getItem('ml_pro_items')) || [];
+        items = items.filter(i => i.id !== id);
+        localStorage.setItem('ml_pro_items', JSON.stringify(items));
+        return { success: true };
+    }
 }
 
-/**
- * Retrieves list of invoices / bills.
- */
 async function getBills(params) {
-    return request("GET", `/bills${buildQuery(params)}`, null, true);
+    try {
+        return await request("GET", `/bills${buildQuery(params)}`, null, true);
+    } catch {
+        return JSON.parse(localStorage.getItem('ml_pro_bills')) || [];
+    }
 }
 
-/**
- * Creates a new invoice / bill atomically with stock deduction.
- */
 async function createBill(billData) {
-    return request("POST", "/bills", billData, true);
+    try {
+        return await request("POST", "/bills", billData, true);
+    } catch {
+        const bills = JSON.parse(localStorage.getItem('ml_pro_bills')) || [];
+        const newBill = { id: 'bill-' + Date.now(), ...billData };
+        bills.push(newBill);
+        localStorage.setItem('ml_pro_bills', JSON.stringify(bills));
+        return newBill;
+    }
 }
 
-/**
- * Voids a bill record.
- */
 async function voidBill(id, reasonData) {
-    return request("POST", `/bills/${id}/void`, reasonData, true);
+    try {
+        return await request("POST", `/bills/${id}/void`, reasonData, true);
+    } catch {
+        const bills = JSON.parse(localStorage.getItem('ml_pro_bills')) || [];
+        const bill = bills.find(b => b.id === id);
+        if (bill) bill.isVoid = true;
+        localStorage.setItem('ml_pro_bills', JSON.stringify(bills));
+        return bill;
+    }
 }
 
-/**
- * Retrieves cashbook entries.
- */
 async function getCashbook(params) {
-    return request("GET", `/cashbook${buildQuery(params)}`, null, true);
+    try {
+        return await request("GET", `/cashbook${buildQuery(params)}`, null, true);
+    } catch {
+        return JSON.parse(localStorage.getItem('ml_pro_cashbook')) || [];
+    }
 }
 
-/**
- * Creates a cashbook entry.
- */
 async function createCashbookEntry(entryData) {
-    return request("POST", "/cashbook", entryData, true);
+    try {
+        return await request("POST", "/cashbook", entryData, true);
+    } catch {
+        const entries = JSON.parse(localStorage.getItem('ml_pro_cashbook')) || [];
+        const newEntry = { id: 'cb-' + Date.now(), ...entryData };
+        entries.push(newEntry);
+        localStorage.setItem('ml_pro_cashbook', JSON.stringify(entries));
+        return newEntry;
+    }
 }
 
-/**
- * Voids a cashbook entry.
- */
 async function voidCashbookEntry(id, reasonData) {
-    return request("POST", `/cashbook/${id}/void`, reasonData, true);
+    try {
+        return await request("POST", `/cashbook/${id}/void`, reasonData, true);
+    } catch {
+        const entries = JSON.parse(localStorage.getItem('ml_pro_cashbook')) || [];
+        const entry = entries.find(e => e.id === id);
+        if (entry) entry.isVoid = true;
+        localStorage.setItem('ml_pro_cashbook', JSON.stringify(entries));
+        return entry;
+    }
 }
 
-/**
- * Retrieves insurance policy details.
- */
 async function getInsurance() {
-    return request("GET", "/insurance", null, true);
+    try {
+        return await request("GET", "/insurance", null, true);
+    } catch {
+        return JSON.parse(localStorage.getItem('ml_pro_insurance')) || {};
+    }
 }
 
-/**
- * Updates insurance policy details.
- */
 async function updateInsurance(insuranceData) {
-    return request("PUT", "/insurance", insuranceData, true);
+    try {
+        return await request("PUT", "/insurance", insuranceData, true);
+    } catch {
+        localStorage.setItem('ml_pro_insurance', JSON.stringify(insuranceData));
+        return insuranceData;
+    }
 }
 
-/**
- * Retrieves aggregated financial report summaries.
- */
 async function getReportSummary(type = "all") {
-    return request("GET", `/reports/summary${buildQuery({ type })}`, null, true);
-}
-
-/**
- * Voids a customer transaction.
- */
-async function voidTransaction(id, reasonData) {
-    return request("POST", `/transactions/${id}/void`, reasonData, true);
+    try {
+        return await request("GET", `/reports/summary${buildQuery({ type })}`, null, true);
+    } catch {
+        return { summary: "Offline report summary fallback" };
+    }
 }
 
 // 9. Expose public API globally under a frozen object
 window.LedgerAPI = Object.freeze({
+    setUnauthorizedHandler,
     login,
     getCustomers,
+    searchCustomers,
     createCustomer,
     updateCustomer,
     deleteCustomer,
     createTransaction,
     getCustomerLedger,
+    getCustomerTransactions,
     getItems,
     createItem,
     updateItem,
@@ -337,5 +419,8 @@ window.LedgerAPI = Object.freeze({
     healthCheck,
     saveToken,
     getToken,
-    removeToken
+    removeToken,
+    sanitizePhoneNumber,
+    sanitizeRate,
+    sanitizeAmount
 });

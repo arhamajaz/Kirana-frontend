@@ -1,0 +1,9 @@
+# Ignore cloned backend repository subfolder inside frontend repo
+backend_repo/
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
