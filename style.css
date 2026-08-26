@@ -711,7 +711,9 @@ button {
 }
 
 /* --- Tables & Horizontal Touch Scrolling --- */
-.table-container {
+.table-container,
+.customer-list-container,
+.transaction-list-container {
     background-color: var(--surface-color);
     border: 1px solid var(--border-color);
     border-radius: 16px;
@@ -1459,4 +1461,59 @@ input:focus, select:focus, textarea:focus {
         padding-bottom: env(safe-area-inset-bottom);
         height: calc(68px + env(safe-area-inset-bottom));
     }
+}
+
+/* --- Audit & Transparency Features --- */
+.status-badge.status-edited {
+    background: var(--warning-bg);
+    color: var(--warning-accent);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    font-size: 0.65rem;
+    margin-left: 6px;
+    padding: 2px 6px;
+}
+
+.interest-breakdown-trigger {
+    cursor: pointer;
+    border-bottom: 1px dashed var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: color var(--transition-speed);
+}
+
+.interest-breakdown-trigger:hover {
+    color: var(--primary-accent);
+    border-bottom-color: var(--primary-accent);
+}
+
+.breakdown-step {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+}
+
+.breakdown-step h4 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+    color: var(--primary-accent);
+}
+
+.breakdown-step p {
+    margin: 4px 0;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.breakdown-step .formula {
+    background: var(--surface-color);
+    padding: 8px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    margin-top: 8px;
+    border: 1px dashed var(--border-color);
 }

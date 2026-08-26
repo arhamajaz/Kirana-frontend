@@ -112,6 +112,35 @@ CREATE INDEX IF NOT EXISTS idx_bills_merchant ON bills(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_cashbook_merchant ON cashbook(merchant_id);
 
 -- ================================================================
+-- ROW LEVEL SECURITY (RLS) POLICIES FOR SUPABASE TENANT ISOLATION
+-- ================================================================
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bills ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cashbook ENABLE ROW LEVEL SECURITY;
+ALTER TABLE insurance ENABLE ROW LEVEL SECURITY;
+
+-- Tenant Isolation Policies: Users can only access rows belonging to their merchant_id
+DROP POLICY IF EXISTS merchant_isolation_customers ON customers;
+CREATE POLICY merchant_isolation_customers ON customers FOR ALL USING (merchant_id = auth.uid());
+
+DROP POLICY IF EXISTS merchant_isolation_items ON items;
+CREATE POLICY merchant_isolation_items ON items FOR ALL USING (merchant_id = auth.uid());
+
+DROP POLICY IF EXISTS merchant_isolation_bills ON bills;
+CREATE POLICY merchant_isolation_bills ON bills FOR ALL USING (merchant_id = auth.uid());
+
+DROP POLICY IF EXISTS merchant_isolation_transactions ON transactions;
+CREATE POLICY merchant_isolation_transactions ON transactions FOR ALL USING (merchant_id = auth.uid());
+
+DROP POLICY IF EXISTS merchant_isolation_cashbook ON cashbook;
+CREATE POLICY merchant_isolation_cashbook ON cashbook FOR ALL USING (merchant_id = auth.uid());
+
+DROP POLICY IF EXISTS merchant_isolation_insurance ON insurance;
+CREATE POLICY merchant_isolation_insurance ON insurance FOR ALL USING (merchant_id = auth.uid());
+
+-- ================================================================
 -- ATOMIC STORED PROCEDURE FOR BILL CREATION & STOCK DECREMENT
 -- ================================================================
 CREATE OR REPLACE FUNCTION create_bill_atomic(

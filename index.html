@@ -77,9 +77,27 @@
                         <i class="ph ph-magnifying-glass"></i>
                         <input type="text" id="search-input" placeholder="Search customers...">
                     </div>
+                    <button id="btn-backup-db" class="btn-outline">
+                        <i class="ph ph-database"></i> Backup
+                    </button>
                     <button id="btn-new-customer" class="btn-primary">
                         <i class="ph ph-plus"></i> New Customer
                     </button>
+                </div>
+                
+                <div class="summary-cards" style="margin-bottom: 24px;">
+                    <div class="card highlight-danger">
+                        <h3>Total Principal Outstanding</h3>
+                        <p id="dash-stat-principal" class="amount text-danger">₹0.00</p>
+                    </div>
+                    <div class="card highlight-success">
+                        <h3>Total Interest Accrued</h3>
+                        <p id="dash-stat-interest" class="amount text-danger">₹0.00</p>
+                    </div>
+                    <div class="card highlight">
+                        <h3>Total Net Balance</h3>
+                        <p id="dash-stat-net" class="amount">₹0.00</p>
+                    </div>
                 </div>
                 
                 <div class="customer-list-container">
@@ -415,6 +433,10 @@
                     </button>
                     <h2 id="ledger-customer-name">Customer Name</h2>
                     <div class="ledger-header-actions">
+                        <div class="date-picker-group" style="display: flex; align-items: center; gap: 8px; background: var(--surface-color); padding: 4px 12px; border-radius: 8px; border: 1px solid var(--border-color);">
+                            <label for="ledger-as-of-date" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 600; white-space: nowrap;">Date of Settlement:</label>
+                            <input type="date" id="ledger-as-of-date" style="border: none; background: transparent; color: var(--text-primary); font-family: inherit; font-size: 0.9rem; outline: none; cursor: pointer;">
+                        </div>
                         <button id="btn-whatsapp" class="btn-whatsapp">
                             <i class="ph ph-whatsapp-logo"></i> Reminder
                         </button>
@@ -788,6 +810,7 @@
                 <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
             </div>
             <form id="transaction-form">
+                <input type="hidden" id="txn-id">
                 <div class="form-group">
                     <label>Date</label>
                     <input type="date" id="txn-date" required>
@@ -1029,6 +1052,40 @@
                 </div>
                 <button type="submit" class="btn-primary full-width" style="background-color: var(--debit-accent); color: #fff;">Confirm Void Reversal</button>
             </form>
+        </div>
+    </div>
+
+    <!-- Interest Breakdown Modal -->
+    <div id="interest-breakdown-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Interest Calculation Breakdown</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <div id="interest-breakdown-body" style="padding: 16px 0; max-height: 60vh; overflow-y: auto;">
+                <!-- Breakdown injected here via JS -->
+            </div>
+            <button class="btn-primary full-width modal-close" style="margin-top: 8px;">Got It</button>
+        </div>
+    </div>
+
+    <!-- PDF Export Modal -->
+    <div id="pdf-export-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>Export Statement</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <div style="padding: 16px 0; display: flex; flex-direction: column; gap: 16px;">
+                <button id="btn-pdf-detailed" class="btn-primary" style="padding: 16px; text-align: left; display: block; height: auto;">
+                    <strong style="display: block; margin-bottom: 4px; font-size: 1.1rem;"><i class="ph ph-list-numbers"></i> Detailed Statement</strong>
+                    <span style="font-size: 0.85rem; font-weight: normal; opacity: 0.9;">Itemizes interest on every single transaction row. Shows exact evolution of principal and interest step-by-step.</span>
+                </button>
+                <button id="btn-pdf-summarized" class="btn-outline" style="padding: 16px; text-align: left; display: block; height: auto;">
+                    <strong style="display: block; margin-bottom: 4px; font-size: 1.1rem; color: var(--text-primary);"><i class="ph ph-list-dashes"></i> Summarized Statement</strong>
+                    <span style="font-size: 0.85rem; font-weight: normal; color: var(--text-secondary);">Rows only show Principal transactions. Total accrued interest is displayed as a single line item at the bottom.</span>
+                </button>
+            </div>
         </div>
     </div>
 

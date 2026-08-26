@@ -1,5 +1,5 @@
-# Ignore cloned backend repository subfolder inside frontend repo
-backend_repo/
+# Ignore backend repository subfolder inside frontend repo
+backend/
 
 # OS and IDE files
 .DS_Store
