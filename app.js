@@ -66,76 +66,181 @@ themeToggleBtn.addEventListener('click', () => {
     themeToggleBtn.innerHTML = newTheme === 'dark' ? '<i class="ph ph-sun"></i>' : '<i class="ph ph-moon"></i>';
 });
 
-// --- AUTHENTICATION & NAVIGATION ---
-document.getElementById('login-form').onsubmit = async (e) => {
-    e.preventDefault();
-    const email = document.getElementById('login-email').value;
-    const password = document.getElementById('login-pwd').value;
-    const errorEl = document.getElementById('login-error');
+// --- AUTHENTICATION & ROUTE GUARDING ---
+function checkAuthState() {
+    initTheme();
+    const token = LedgerAPI.getToken();
+    const isTestMode = localStorage.getItem('ml_pro_test_mode') === 'true';
 
-    // Reset previous errors
-    errorEl.textContent = '';
-    errorEl.classList.add('hidden');
-
-    try {
-        // 1. Health check to ensure backend server is available
-        try {
-            await LedgerAPI.healthCheck();
-        } catch (healthError) {
-            console.error("Health check failed:", healthError);
-            errorEl.textContent = 'Backend server is unavailable. Please start the backend server and try again.';
-            errorEl.classList.remove('hidden');
-            return;
-        }
-
-        // 2. Perform backend login
-        const loginData = await LedgerAPI.login(email, password);
-
-        // 3. Save token, trigger cloud migration and update state
-        if (loginData && loginData.token) {
-            LedgerAPI.saveToken(loginData.token);
-            state.isAuthenticated = true;
-            document.getElementById('auth-view').classList.remove('active');
-            document.getElementById('auth-view').classList.add('hidden');
-            document.getElementById('app-wrapper').classList.remove('hidden');
-            await syncLocalDataToCloud();
-            await showDashboard();
-        } else {
-            throw new Error('Authentication failed: No token received.');
-        }
-    } catch (err) {
-        console.error("Login failed:", err);
-        errorEl.textContent = err.message || 'Login failed. Please check your credentials.';
-        errorEl.classList.remove('hidden');
+    if (token || isTestMode) {
+        state.isAuthenticated = true;
+        document.getElementById('auth-view').classList.remove('active');
+        document.getElementById('auth-view').classList.add('hidden');
+        document.getElementById('app-wrapper').classList.remove('hidden');
+        switchView('dashboard-view');
+    } else {
+        state.isAuthenticated = false;
+        document.getElementById('app-wrapper').classList.add('hidden');
+        document.getElementById('auth-view').classList.remove('hidden');
+        document.getElementById('auth-view').classList.add('active');
     }
-};
+}
 
-document.getElementById('btn-logout').onclick = () => {
+// 401 Unauthorized Interceptor Setup
+if (window.LedgerAPI && typeof window.LedgerAPI.setUnauthorizedHandler === 'function') {
+    window.LedgerAPI.setUnauthorizedHandler(() => {
+        handleLogout("Session expired. Please sign in again.");
+    });
+}
+
+function handleLogout(message = "") {
     LedgerAPI.removeToken();
     localStorage.removeItem('ml_pro_test_mode');
     state.isAuthenticated = false;
     document.getElementById('app-wrapper').classList.add('hidden');
     document.getElementById('auth-view').classList.remove('hidden');
     document.getElementById('auth-view').classList.add('active');
-    const errorEl = document.getElementById('login-error');
-    if (errorEl) {
-        errorEl.textContent = '';
-        errorEl.classList.add('hidden');
-    }
-};
 
-document.getElementById('btn-skip-login')?.addEventListener('click', () => {
-    state.isAuthenticated = true;
-    localStorage.setItem('ml_pro_test_mode', 'true');
-    document.getElementById('auth-view').classList.remove('active');
-    document.getElementById('auth-view').classList.add('hidden');
-    document.getElementById('app-wrapper').classList.remove('hidden');
-    const errorEl = document.getElementById('login-error');
-    if (errorEl) {
-        errorEl.textContent = '';
-        errorEl.classList.add('hidden');
+    const loginErrEl = document.getElementById('login-error');
+    if (loginErrEl) {
+        if (message) {
+            loginErrEl.textContent = message;
+            loginErrEl.classList.remove('hidden');
+        } else {
+            loginErrEl.textContent = '';
+            loginErrEl.classList.add('hidden');
+        }
     }
-    switchView('dashboard-view');
+}
+
+// Tab Switching (Sign In vs Create Account)
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.auth-tab').forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+
+            const targetFormId = e.currentTarget.getAttribute('data-target');
+            document.querySelectorAll('.auth-form').forEach(form => {
+                if (form.id === targetFormId) {
+                    form.classList.remove('hidden');
+                    form.classList.add('active');
+                } else {
+                    form.classList.remove('active');
+                    form.classList.add('hidden');
+                }
+            });
+        });
+    });
+
+    // Login Form Handler
+    const loginForm = document.getElementById('login-form');
+    if (loginForm) {
+        loginForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-pwd').value;
+            const errorEl = document.getElementById('login-error');
+            const submitBtn = document.getElementById('btn-login-submit');
+
+            errorEl.textContent = '';
+            errorEl.classList.add('hidden');
+
+            if (submitBtn) submitBtn.disabled = true;
+
+            try {
+                const loginRes = await LedgerAPI.loginUser(email, password);
+                if (loginRes && (loginRes.token || LedgerAPI.getToken())) {
+                    state.isAuthenticated = true;
+                    document.getElementById('auth-view').classList.remove('active');
+                    document.getElementById('auth-view').classList.add('hidden');
+                    document.getElementById('app-wrapper').classList.remove('hidden');
+                    switchView('dashboard-view');
+                } else {
+                    throw new Error('Authentication failed: Invalid credentials.');
+                }
+            } catch (err) {
+                console.error("Login failed:", err);
+                errorEl.textContent = err.message || 'Login failed. Please check your credentials.';
+                errorEl.classList.remove('hidden');
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
+            }
+        };
+    }
+
+    // Sign-Up Form Handler
+    const signupForm = document.getElementById('signup-form');
+    if (signupForm) {
+        signupForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('signup-name').value;
+            const shop = document.getElementById('signup-shop').value;
+            const email = document.getElementById('signup-email').value;
+            const password = document.getElementById('signup-pwd').value;
+            const confirmPassword = document.getElementById('signup-confirm-pwd').value;
+            const errorEl = document.getElementById('signup-error');
+            const submitBtn = document.getElementById('btn-signup-submit');
+
+            errorEl.textContent = '';
+            errorEl.classList.add('hidden');
+
+            if (password !== confirmPassword) {
+                errorEl.textContent = 'Passwords do not match. Please re-enter.';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            if (password.length < 6) {
+                errorEl.textContent = 'Password must be at least 6 characters long.';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            if (submitBtn) submitBtn.disabled = true;
+
+            try {
+                const signupRes = await LedgerAPI.registerUser(email, password, name, shop);
+                if (signupRes && (signupRes.token || LedgerAPI.getToken())) {
+                    state.isAuthenticated = true;
+                    document.getElementById('auth-view').classList.remove('active');
+                    document.getElementById('auth-view').classList.add('hidden');
+                    document.getElementById('app-wrapper').classList.remove('hidden');
+                    switchView('dashboard-view');
+                } else {
+                    throw new Error('Registration failed.');
+                }
+            } catch (err) {
+                console.error("Registration failed:", err);
+                errorEl.textContent = err.message || 'Registration failed. Email may already exist.';
+                errorEl.classList.remove('hidden');
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
+            }
+        };
+    }
+
+    // Logout Button Listener
+    const logoutBtn = document.getElementById('btn-logout');
+    if (logoutBtn) {
+        logoutBtn.onclick = () => handleLogout();
+    }
+
+    // Skip Login (Test Mode) Listener
+    const skipLoginBtn = document.getElementById('btn-skip-login');
+    if (skipLoginBtn) {
+        skipLoginBtn.onclick = () => {
+            state.isAuthenticated = true;
+            localStorage.setItem('ml_pro_test_mode', 'true');
+            document.getElementById('auth-view').classList.remove('active');
+            document.getElementById('auth-view').classList.add('hidden');
+            document.getElementById('app-wrapper').classList.remove('hidden');
+            switchView('dashboard-view');
+        };
+    }
+
+    // Check Auth State on Page Load
+    checkAuthState();
 });
 
 function switchView(targetId) {

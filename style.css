@@ -1517,3 +1517,159 @@ input:focus, select:focus, textarea:focus {
     margin-top: 8px;
     border: 1px dashed var(--border-color);
 }
+
+/* ==========================================================================
+   AUTHENTICATION VIEW & CARDS (Login & Sign-Up)
+   ========================================================================== */
+.auth-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    width: 100%;
+    padding: 20px;
+    background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 40%),
+                radial-gradient(circle at bottom left, rgba(16, 185, 129, 0.08), transparent 40%),
+                var(--bg-color);
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 440px;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 32px 28px;
+    box-shadow: var(--card-shadow);
+    backdrop-filter: blur(12px);
+    transition: transform var(--transition-speed) var(--transition-cubic), box-shadow var(--transition-speed);
+}
+
+.auth-header {
+    text-align: center;
+    margin-bottom: 24px;
+}
+
+.auth-logo {
+    font-size: 2.75rem;
+    color: var(--primary-accent);
+    margin-bottom: 8px;
+    display: inline-block;
+}
+
+.auth-header h2 {
+    font-family: var(--font-heading);
+    font-size: 1.65rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.auth-subtitle {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.auth-tabs {
+    display: flex;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 24px;
+    gap: 4px;
+}
+
+.auth-tab {
+    flex: 1;
+    padding: 10px 14px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 0.9rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.auth-tab.active {
+    background: var(--surface-color);
+    color: var(--text-primary);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.auth-form.hidden {
+    display: none;
+}
+
+.auth-error-msg {
+    background: var(--debit-bg);
+    border: 1px solid var(--debit-accent);
+    color: var(--debit-accent);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    text-align: center;
+}
+
+.auth-form label {
+    font-size: 0.825rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.auth-form input {
+    width: 100%;
+    padding: 12px 14px;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-size: 0.925rem;
+    transition: border-color var(--transition-speed), box-shadow var(--transition-speed);
+}
+
+.auth-form input:focus {
+    outline: none;
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+
+.btn-primary.full-width {
+    width: 100%;
+    justify-content: center;
+    padding: 12px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-top: 6px;
+}
+
+.style-ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-secondary);
+}
+
+.style-ghost:hover {
+    background: var(--hover-overlay);
+    color: var(--text-primary);
+}
+
+@media (max-width: 480px) {
+    .auth-card {
+        padding: 24px 18px;
+        border-radius: 12px;
+    }
+}

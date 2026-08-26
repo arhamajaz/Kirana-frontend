@@ -11,7 +11,7 @@ const API = Object.freeze({
     BASE_URL: window.ENV?.API_BASE_URL || "http://localhost:3000/api/v1"
 });
 
-const TOKEN_KEY = "ml_pro_jwt_token";
+const TOKEN_KEY = "ml_pro_auth_token";
 
 // --- 401 UNAUTHORIZED INTERCEPTOR CALLBACK ---
 let onUnauthorizedCallback = null;
@@ -24,15 +24,19 @@ function setUnauthorizedHandler(fn) {
 
 // --- JWT TOKEN MANAGEMENT HELPERS ---
 function saveToken(token) {
-    localStorage.setItem(TOKEN_KEY, token);
+    if (token) {
+        localStorage.setItem(TOKEN_KEY, token);
+        localStorage.setItem("ml_pro_jwt_token", token);
+    }
 }
 
 function getToken() {
-    return localStorage.getItem(TOKEN_KEY);
+    return localStorage.getItem(TOKEN_KEY) || localStorage.getItem("ml_pro_jwt_token");
 }
 
 function removeToken() {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem("ml_pro_jwt_token");
 }
 
 // --- INPUT SANITIZATION HELPERS (ZOD ALIGNMENT) ---
@@ -154,11 +158,58 @@ async function request(method, endpoint, body = null, authenticated = false) {
 
 // --- PUBLIC API METHODS ---
 
+async function loginUser(email, password) {
+    try {
+        const res = await request("POST", "/auth/login", { 
+            email: email ? String(email).trim().toLowerCase() : "", 
+            password: password ? String(password) : "" 
+        }, false);
+
+        if (res && res.token) {
+            saveToken(res.token);
+        }
+        return res;
+    } catch (err) {
+        if (err.message && err.message.includes("Network error")) {
+            console.warn("Backend server offline. Falling back to demo mode.");
+            const mockToken = "mock_token_" + Date.now();
+            saveToken(mockToken);
+            return { token: mockToken, user: { email, businessName: "Malwa Merchants (Demo)" } };
+        }
+        throw err;
+    }
+}
+
+async function registerUser(email, password, name = "", businessName = "") {
+    try {
+        const res = await request("POST", "/auth/register", {
+            email: email ? String(email).trim().toLowerCase() : "",
+            password: password ? String(password) : "",
+            name: name ? String(name).trim() : "",
+            businessName: businessName ? String(businessName).trim() : ""
+        }, false);
+
+        if (res && res.token) {
+            saveToken(res.token);
+        }
+        return res;
+    } catch (err) {
+        if (err.message && err.message.includes("Network error")) {
+            console.warn("Backend server offline. Falling back to demo mode.");
+            const mockToken = "mock_token_" + Date.now();
+            saveToken(mockToken);
+            return { token: mockToken, user: { email, businessName: businessName || name || "Malwa Merchants (Demo)" } };
+        }
+        throw err;
+    }
+}
+
 async function login(email, password) {
-    return request("POST", "/auth/login", { 
-        email: email ? String(email).trim().toLowerCase() : "", 
-        password: password ? String(password) : "" 
-    }, false);
+    return loginUser(email, password);
+}
+
+async function register(email, password, name, businessName) {
+    return registerUser(email, password, name, businessName);
 }
 
 async function getCustomers(params) {
@@ -394,6 +445,9 @@ async function getReportSummary(type = "all") {
 window.LedgerAPI = Object.freeze({
     setUnauthorizedHandler,
     login,
+    loginUser,
+    register,
+    registerUser,
     getCustomers,
     searchCustomers,
     createCustomer,

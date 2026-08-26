@@ -18,22 +18,64 @@
 </head>
 <body>
     <section id="auth-view" class="view active auth-container">
-        <div class="auth-box">
-            <i class="ph ph-book-open-text auth-logo"></i>
-            <h2>Malwa Ledger Pro</h2>
-            <p class="text-secondary">Sign in to sync your data</p>
-            <form id="login-form">
-                <div id="login-error" class="text-danger hidden" style="margin-bottom: 1rem; font-size: 0.875rem; text-align: center;"></div>
+        <div class="auth-card">
+            <div class="auth-header">
+                <i class="ph ph-book-open-text auth-logo"></i>
+                <h2>Kirana Ledger Pro</h2>
+                <p class="auth-subtitle">Secure Merchant Management System</p>
+            </div>
+
+            <!-- Auth Toggle Tabs -->
+            <div class="auth-tabs">
+                <button type="button" class="auth-tab active" id="tab-login" data-target="login-form">Sign In</button>
+                <button type="button" class="auth-tab" id="tab-signup" data-target="signup-form">Create Account</button>
+            </div>
+
+            <!-- Login Form -->
+            <form id="login-form" class="auth-form active">
+                <div id="login-error" class="auth-error-msg hidden"></div>
                 <div class="form-group">
-                    <label>Email Address</label>
-                    <input type="email" id="login-email" placeholder="merchant@test.com" required>
+                    <label for="login-email"><i class="ph ph-envelope-simple"></i> Email Address</label>
+                    <input type="email" id="login-email" placeholder="merchant@kirana.com" required autocomplete="email">
                 </div>
                 <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="login-pwd" required>
+                    <label for="login-pwd"><i class="ph ph-lock-key"></i> Password</label>
+                    <input type="password" id="login-pwd" placeholder="••••••••" required autocomplete="current-password">
                 </div>
-                <button type="submit" class="btn-primary full-width">Secure Login</button>
-                <button type="button" id="btn-skip-login" class="btn-outline full-width" style="margin-top: 8px;">Skip Login (Test Mode)</button>
+                <button type="submit" class="btn-primary full-width" id="btn-login-submit">
+                    <i class="ph ph-sign-in"></i> Secure Sign In
+                </button>
+                <button type="button" id="btn-skip-login" class="btn-outline full-width style-ghost" style="margin-top: 6px;">
+                    <i class="ph ph-eye-slash"></i> Skip Login (Test Mode)
+                </button>
+            </form>
+
+            <!-- Sign Up Form -->
+            <form id="signup-form" class="auth-form hidden">
+                <div id="signup-error" class="auth-error-msg hidden"></div>
+                <div class="form-group">
+                    <label for="signup-name"><i class="ph ph-user"></i> Full Name</label>
+                    <input type="text" id="signup-name" placeholder="Ramesh Patel" required autocomplete="name">
+                </div>
+                <div class="form-group">
+                    <label for="signup-shop"><i class="ph ph-storefront"></i> Shop / Business Name</label>
+                    <input type="text" id="signup-shop" placeholder="Patel Kirana & Grain Store" required autocomplete="organization">
+                </div>
+                <div class="form-group">
+                    <label for="signup-email"><i class="ph ph-envelope-simple"></i> Email Address</label>
+                    <input type="email" id="signup-email" placeholder="merchant@kirana.com" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label for="signup-pwd"><i class="ph ph-lock-key"></i> Password</label>
+                    <input type="password" id="signup-pwd" placeholder="Min. 6 characters" required autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label for="signup-confirm-pwd"><i class="ph ph-shield-check"></i> Confirm Password</label>
+                    <input type="password" id="signup-confirm-pwd" placeholder="Re-enter password" required autocomplete="new-password">
+                </div>
+                <button type="submit" class="btn-primary full-width" id="btn-signup-submit">
+                    <i class="ph ph-user-plus"></i> Create Account
+                </button>
             </form>
         </div>
     </section>
