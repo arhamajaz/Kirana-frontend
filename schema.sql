@@ -1,5 +1,6 @@
 -- ================================================================
 -- Malwa Ledger Pro - PostgreSQL / Supabase Relational Database Schema
+-- Self-Healing & Idempotent Migration Script
 -- ================================================================
 
 -- Enable UUID extension if not already enabled
@@ -19,7 +20,7 @@ CREATE TABLE IF NOT EXISTS merchants (
 -- 2. CUSTOMERS TABLE (Customer Ledger Profiles)
 CREATE TABLE IF NOT EXISTS customers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+    merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     phone_number VARCHAR(50),
     lending_rate NUMERIC(5, 2) DEFAULT 0.00,
@@ -27,11 +28,13 @@ CREATE TABLE IF NOT EXISTS customers (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+-- Safeguard: Guarantee merchant_id column exists if table was pre-existing
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE;
 
 -- 3. INVENTORY ITEMS TABLE (Stock Management)
 CREATE TABLE IF NOT EXISTS items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+    merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     qty INT NOT NULL DEFAULT 0 CHECK (qty >= 0),
     min_reorder_qty INT NOT NULL DEFAULT 5,
@@ -40,11 +43,12 @@ CREATE TABLE IF NOT EXISTS items (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE items ADD COLUMN IF NOT EXISTS merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE;
 
 -- 4. BILLS TABLE (Invoices & Sales Receipts)
 CREATE TABLE IF NOT EXISTS bills (
     id VARCHAR(100) PRIMARY KEY,
-    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+    merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
     customer_name VARCHAR(255) NOT NULL,
     date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -58,12 +62,13 @@ CREATE TABLE IF NOT EXISTS bills (
     voided_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE bills ADD COLUMN IF NOT EXISTS merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE;
 
 -- 5. TRANSACTIONS TABLE (Customer Debits/Credits & Waivers)
 CREATE TABLE IF NOT EXISTS transactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-    customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
+    customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
     bill_id VARCHAR(100) REFERENCES bills(id) ON DELETE SET NULL,
     date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     interest_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -76,11 +81,12 @@ CREATE TABLE IF NOT EXISTS transactions (
     voided_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE;
 
 -- 6. CASHBOOK TABLE (Shop Counter Cash Drawer Ledger)
 CREATE TABLE IF NOT EXISTS cashbook (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+    merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     bill_id VARCHAR(100) REFERENCES bills(id) ON DELETE SET NULL,
     date DATE NOT NULL DEFAULT CURRENT_DATE,
     type VARCHAR(20) NOT NULL, -- in, out
@@ -91,11 +97,12 @@ CREATE TABLE IF NOT EXISTS cashbook (
     voided_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE cashbook ADD COLUMN IF NOT EXISTS merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE;
 
 -- 7. INSURANCE TABLE (Shopkeeper Policy & Cover Details)
 CREATE TABLE IF NOT EXISTS insurance (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    merchant_id UUID UNIQUE NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+    merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     policy_name VARCHAR(255),
     provider VARCHAR(255),
     premium_amount NUMERIC(10, 2) DEFAULT 0.00,
@@ -103,8 +110,29 @@ CREATE TABLE IF NOT EXISTS insurance (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE insurance ADD COLUMN IF NOT EXISTS merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE;
 
--- INDEXES FOR HIGH-PERFORMANCE QUERYING
+-- 8. COMPATIBILITY SYNC (Sync user_id to merchant_id if Prisma user_id column exists)
+DO $$ 
+BEGIN 
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='customers' AND column_name='user_id') THEN
+        UPDATE customers SET merchant_id = user_id::UUID WHERE merchant_id IS NULL AND user_id IS NOT NULL;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='items' AND column_name='user_id') THEN
+        UPDATE items SET merchant_id = user_id::UUID WHERE merchant_id IS NULL AND user_id IS NOT NULL;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='bills' AND column_name='user_id') THEN
+        UPDATE bills SET merchant_id = user_id::UUID WHERE merchant_id IS NULL AND user_id IS NOT NULL;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cashbook' AND column_name='user_id') THEN
+        UPDATE cashbook SET merchant_id = user_id::UUID WHERE merchant_id IS NULL AND user_id IS NOT NULL;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='insurance' AND column_name='user_id') THEN
+        UPDATE insurance SET merchant_id = user_id::UUID WHERE merchant_id IS NULL AND user_id IS NOT NULL;
+    END IF;
+END $$;
+
+-- 9. INDEXES FOR HIGH-PERFORMANCE QUERYING
 CREATE INDEX IF NOT EXISTS idx_customers_merchant ON customers(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_customer ON transactions(customer_id);
 CREATE INDEX IF NOT EXISTS idx_items_merchant ON items(merchant_id);
