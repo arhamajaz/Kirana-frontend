@@ -63,6 +63,23 @@ function sanitizeAmount(val) {
     return Number(num.toFixed(2));
 }
 
+// --- SUPABASE CLIENT SETUP ---
+const SUPABASE_URL = window.ENV?.SUPABASE_URL || localStorage.getItem('ml_supabase_url') || "";
+const SUPABASE_ANON_KEY = window.ENV?.SUPABASE_ANON_KEY || localStorage.getItem('ml_supabase_key') || "";
+
+let supabase = null;
+if (window.supabase && typeof window.supabase.createClient === 'function' && SUPABASE_URL && SUPABASE_ANON_KEY) {
+    try {
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    } catch (e) {
+        console.warn("Supabase init skipped:", e);
+    }
+}
+
+function getSupabaseClient() {
+    return supabase;
+}
+
 // --- PRIVATE HELPERS ---
 function buildQuery(params) {
     if (!params || Object.keys(params).length === 0) {
@@ -97,6 +114,13 @@ function buildHeaders(authenticated = false) {
  * Reusable generic request helper.
  */
 async function request(method, endpoint, body = null, authenticated = false) {
+    const isTestMode = localStorage.getItem('ml_pro_test_mode') === 'true';
+    if (isTestMode || (authenticated && !getToken())) {
+        const err = new Error("Offline/Test Mode: Network calls isolated to localStorage.");
+        err.isOffline = true;
+        throw err;
+    }
+
     const url = endpoint.startsWith("http") ? endpoint : `${API.BASE_URL}${endpoint}`;
 
     const config = {
@@ -113,7 +137,9 @@ async function request(method, endpoint, body = null, authenticated = false) {
         response = await fetch(url, config);
     } catch (networkError) {
         console.error("Fetch Network Error:", networkError);
-        throw new Error("Network error: Please check if backend server is running at " + API.BASE_URL);
+        const err = new Error("Network error: Please check if backend server is running at " + API.BASE_URL);
+        err.isOffline = true;
+        throw err;
     }
 
     let responseData = null;
@@ -159,10 +185,30 @@ async function request(method, endpoint, body = null, authenticated = false) {
 // --- PUBLIC API METHODS ---
 
 async function loginUser(email, password) {
+    const cleanEmail = email ? String(email).trim().toLowerCase() : "";
+    const cleanPwd = password ? String(password) : "";
+
+    if (supabase) {
+        try {
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email: cleanEmail,
+                password: cleanPwd
+            });
+            if (error) throw error;
+            if (data?.session) {
+                saveToken(data.session.access_token);
+                return { token: data.session.access_token, user: data.user };
+            }
+        } catch (supaErr) {
+            console.error("Supabase login error:", supaErr);
+            throw supaErr;
+        }
+    }
+
     try {
         const res = await request("POST", "/auth/login", { 
-            email: email ? String(email).trim().toLowerCase() : "", 
-            password: password ? String(password) : "" 
+            email: cleanEmail, 
+            password: cleanPwd 
         }, false);
 
         if (res && res.token) {
@@ -170,7 +216,7 @@ async function loginUser(email, password) {
         }
         return res;
     } catch (err) {
-        if (err.message && err.message.includes("Network error")) {
+        if (err.isOffline || (err.message && err.message.includes("Network error"))) {
             console.warn("Backend server offline. Falling back to demo mode.");
             const mockToken = "mock_token_" + Date.now();
             saveToken(mockToken);
@@ -181,12 +227,47 @@ async function loginUser(email, password) {
 }
 
 async function registerUser(email, password, name = "", businessName = "") {
+    const cleanEmail = email ? String(email).trim().toLowerCase() : "";
+    const cleanPwd = password ? String(password) : "";
+    const cleanName = name ? String(name).trim() : "";
+    const cleanShop = businessName ? String(businessName).trim() : "";
+
+    if (supabase) {
+        try {
+            const { data, error } = await supabase.auth.signUp({
+                email: cleanEmail,
+                password: cleanPwd,
+                options: {
+                    data: { full_name: cleanName, shop_name: cleanShop }
+                }
+            });
+            if (error) throw error;
+            if (data?.session) {
+                saveToken(data.session.access_token);
+            }
+            if (data?.user) {
+                await supabase.from('merchants').upsert({
+                    id: data.user.id,
+                    name: cleanName || 'Merchant',
+                    email: cleanEmail,
+                    shop_name: cleanShop || 'Malwa Grain Merchants'
+                }).catch(err => console.warn("Supabase merchant record upsert warning:", err));
+            }
+            const token = data?.session?.access_token || "mock_token_" + Date.now();
+            saveToken(token);
+            return { token, user: data?.user || { email: cleanEmail } };
+        } catch (supaErr) {
+            console.error("Supabase sign-up error:", supaErr);
+            throw supaErr;
+        }
+    }
+
     try {
         const res = await request("POST", "/auth/register", {
-            email: email ? String(email).trim().toLowerCase() : "",
-            password: password ? String(password) : "",
-            name: name ? String(name).trim() : "",
-            businessName: businessName ? String(businessName).trim() : ""
+            email: cleanEmail,
+            password: cleanPwd,
+            name: cleanName,
+            businessName: cleanShop
         }, false);
 
         if (res && res.token) {
@@ -194,11 +275,11 @@ async function registerUser(email, password, name = "", businessName = "") {
         }
         return res;
     } catch (err) {
-        if (err.message && err.message.includes("Network error")) {
+        if (err.isOffline || (err.message && err.message.includes("Network error"))) {
             console.warn("Backend server offline. Falling back to demo mode.");
             const mockToken = "mock_token_" + Date.now();
             saveToken(mockToken);
-            return { token: mockToken, user: { email, businessName: businessName || name || "Malwa Merchants (Demo)" } };
+            return { token: mockToken, user: { email, businessName: cleanShop || cleanName || "Malwa Merchants (Demo)" } };
         }
         throw err;
     }
@@ -443,6 +524,7 @@ async function getReportSummary(type = "all") {
 
 // 9. Expose public API globally under a frozen object
 window.LedgerAPI = Object.freeze({
+    getSupabaseClient,
     setUnauthorizedHandler,
     login,
     loginUser,

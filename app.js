@@ -69,8 +69,15 @@ themeToggleBtn.addEventListener('click', () => {
 // --- AUTHENTICATION & ROUTE GUARDING ---
 function checkAuthState() {
     initTheme();
+
+    // Warm up backend connection (cold-start mitigation for Render free tier)
+    if (window.LedgerAPI && typeof window.LedgerAPI.healthCheck === 'function') {
+        window.LedgerAPI.healthCheck().catch(() => {});
+    }
+
     const token = LedgerAPI.getToken();
     const isTestMode = localStorage.getItem('ml_pro_test_mode') === 'true';
+    state.isTestMode = isTestMode;
 
     if (token || isTestMode) {
         state.isAuthenticated = true;
@@ -115,21 +122,39 @@ function handleLogout(message = "") {
 
 // Tab Switching (Sign In vs Create Account)
 document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.auth-tab').forEach(tab => {
-        tab.addEventListener('click', (e) => {
-            document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
-            e.currentTarget.classList.add('active');
+    // Tab Switching (Sign In vs Create Account)
+    const switchAuthTab = (targetFormId) => {
+        document.querySelectorAll('.auth-tab').forEach(t => {
+            if (t.getAttribute('data-target') === targetFormId || t.id === `tab-${targetFormId.replace('-form', '')}`) {
+                t.classList.add('active');
+            } else {
+                t.classList.remove('active');
+            }
+        });
 
-            const targetFormId = e.currentTarget.getAttribute('data-target');
-            document.querySelectorAll('.auth-form').forEach(form => {
-                if (form.id === targetFormId) {
-                    form.classList.remove('hidden');
-                    form.classList.add('active');
-                } else {
-                    form.classList.remove('active');
-                    form.classList.add('hidden');
-                }
-            });
+        document.querySelectorAll('.auth-form').forEach(form => {
+            if (form.id === targetFormId) {
+                form.classList.remove('hidden');
+                form.classList.add('active');
+            } else {
+                form.classList.remove('active');
+                form.classList.add('hidden');
+            }
+        });
+
+        // Hide errors
+        const loginErr = document.getElementById('login-error');
+        const signupErr = document.getElementById('signup-error');
+        if (loginErr) loginErr.classList.add('hidden');
+        if (signupErr) signupErr.classList.add('hidden');
+    };
+
+    document.querySelectorAll('.auth-tab, #btn-toggle-signup, #btn-toggle-login').forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            e.preventDefault();
+            const targetFormId = e.currentTarget.getAttribute('data-target') || 
+                (e.currentTarget.id.includes('signup') ? 'signup-form' : 'login-form');
+            switchAuthTab(targetFormId);
         });
     });
 
@@ -142,11 +167,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const password = document.getElementById('login-pwd').value;
             const errorEl = document.getElementById('login-error');
             const submitBtn = document.getElementById('btn-login-submit');
+            const originalBtnHtml = submitBtn ? submitBtn.innerHTML : '<i class="ph ph-sign-in"></i> Secure Sign In';
 
             errorEl.textContent = '';
             errorEl.classList.add('hidden');
 
-            if (submitBtn) submitBtn.disabled = true;
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="ph ph-spinner spinner spin"></i> Authenticating...';
+            }
 
             try {
                 const loginRes = await LedgerAPI.loginUser(email, password);
@@ -164,7 +193,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 errorEl.textContent = err.message || 'Login failed. Please check your credentials.';
                 errorEl.classList.remove('hidden');
             } finally {
-                if (submitBtn) submitBtn.disabled = false;
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalBtnHtml;
+                }
             }
         };
     }
@@ -181,6 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const confirmPassword = document.getElementById('signup-confirm-pwd').value;
             const errorEl = document.getElementById('signup-error');
             const submitBtn = document.getElementById('btn-signup-submit');
+            const originalBtnHtml = submitBtn ? submitBtn.innerHTML : '<i class="ph ph-user-plus"></i> Create Account';
 
             errorEl.textContent = '';
             errorEl.classList.add('hidden');
@@ -197,7 +230,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            if (submitBtn) submitBtn.disabled = true;
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="ph ph-spinner spinner spin"></i> Creating Account...';
+            }
 
             try {
                 const signupRes = await LedgerAPI.registerUser(email, password, name, shop);
@@ -215,7 +251,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 errorEl.textContent = err.message || 'Registration failed. Email may already exist.';
                 errorEl.classList.remove('hidden');
             } finally {
-                if (submitBtn) submitBtn.disabled = false;
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalBtnHtml;
+                }
             }
         };
     }
@@ -911,18 +950,27 @@ document.getElementById('customer-form').onsubmit = async (e) => {
                 depositRate
             };
 
-            await LedgerAPI.updateCustomer(id, customerData);
+            const idx = state.customers.findIndex(c => c.id === id);
+            if (idx !== -1) {
+                state.customers[idx] = { ...state.customers[idx], ...customerData };
+                saveData();
+            }
+
+            if (!state.isTestMode && LedgerAPI.getToken()) {
+                try {
+                    await LedgerAPI.updateCustomer(id, customerData);
+                } catch (apiErr) {
+                    console.warn("Backend customer update sync failed, saved locally:", apiErr);
+                }
+            }
 
             // Reset and close
             e.target.reset();
             toggleModal('customer-modal', false);
-
-            // Fetch fresh customers and render
-            await showDashboard();
+            renderDashboard();
         } catch (err) {
             console.error("Update customer failed:", err);
-            // Show the backend error message inside the modal
-            errorEl.textContent = err.message || 'Unable to update customer. Please check your connection and try again.';
+            errorEl.textContent = err.message || 'Unable to update customer. Saved locally.';
             errorEl.classList.remove('hidden');
         } finally {
             submitBtn.disabled = false;
@@ -960,25 +1008,37 @@ document.getElementById('customer-form').onsubmit = async (e) => {
         const compoundingFrequency = 'MONTHLY'; // Default compounding frequency for this phase
 
         const customerData = {
+            id: 'cust-' + Date.now(),
             name,
             phoneNumber,
             lendingRate,
             depositRate,
-            compoundingFrequency
+            compoundingFrequency,
+            createdAt: new Date().toISOString()
         };
 
-        await LedgerAPI.createCustomer(customerData);
+        state.customers.push(customerData);
+        saveData();
+
+        if (!state.isTestMode && LedgerAPI.getToken()) {
+            try {
+                const res = await LedgerAPI.createCustomer(customerData);
+                if (res && res.id) {
+                    customerData.id = res.id;
+                    saveData();
+                }
+            } catch (apiErr) {
+                console.warn("Backend customer creation sync failed, saved locally:", apiErr);
+            }
+        }
 
         // Reset and close
         e.target.reset();
         toggleModal('customer-modal', false);
-
-        // Fetch fresh customers and render
-        await showDashboard();
+        renderDashboard();
     } catch (err) {
         console.error("Create customer failed:", err);
-        // Show the backend message inside the modal
-        errorEl.textContent = err.message || 'Unable to create customer. Please check your connection and try again.';
+        errorEl.textContent = err.message || 'Unable to create customer. Saved locally.';
         errorEl.classList.remove('hidden');
     } finally {
         submitBtn.disabled = false;
@@ -1359,47 +1419,42 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
     doc.setFontSize(20);
     doc.text("Malwa Grain Merchants", 14, 20);
     doc.setFontSize(12);
-    doc.text(`Statement of Account (${mode === 'detailed' ? 'Detailed Ledger' : 'Summarized'})`, 14, 28);
+    doc.text(`Statement of Account (${mode === 'detailed' ? 'Detailed Itemized Statement' : 'Summary Statement'})`, 14, 28);
     
     doc.setFontSize(10);
     doc.text(`Customer Name: ${customer.name}`, 14, 40);
     doc.text(`Phone: ${customer.phoneNumber || 'N/A'}`, 14, 45);
     doc.text(`Generated On: ${formatDate(new Date())}`, 14, 50);
 
-    doc.text(`Net Outstanding: ${formatCurrency(Math.abs(ledger.netOutstanding))} ${ledger.netOutstanding > 0 ? '(Dr - Customer Owes)' : '(Cr - Store Owes)'}`, 120, 40);
+    doc.text(`Net Balance: ${formatCurrency(Math.abs(ledger.netOutstanding))} ${ledger.netOutstanding > 0 ? '(Dr - Customer Owes)' : '(Cr - Store Owes)'}`, 120, 40);
     doc.text(`Principal Remaining: ${formatCurrency(Math.abs(ledger.totalPrincipalRemaining))}`, 120, 45);
-    doc.text(`Accrued Interest: ${formatCurrency(ledger.totalAccruedInterest)}`, 120, 50);
+    doc.text(`Total Accrued Interest: ${formatCurrency(ledger.totalAccruedInterest)}`, 120, 50);
 
-    const tableBody = (ledger.rows || []).map(row => {
-        let note = row.remarks || '';
-        if (row.type === 'debit') {
-            const phaseTag = formatPhaseSummaryBadge(getTxnInterestPhases(row));
-            note += ` [${phaseTag}]`;
-        } else if (row.type === 'credit' && row.paymentTrace) {
-            note += ` [Applied: ${row.paymentTrace}]`;
-        }
-
-        if (mode === 'summarized') {
-            return [
-                formatDate(row.date),
-                (row.category ? `[${row.category}] ` : '') + note,
-                row.type === 'debit' ? formatCurrency(row.amount) : '-',
-                row.type === 'credit' || row.type === 'adjustment' ? formatCurrency(row.amount) : (row.type === 'waiver' ? `(Waiver) ${formatCurrency(row.amount)}` : '-'),
-                formatCurrency(Math.abs(row.runningPrincipal || 0))
-            ];
-        }
-
-        return [
-            formatDate(row.date),
-            (row.category ? `[${row.category}] ` : '') + note,
-            row.type === 'debit' ? formatCurrency(row.amount) : '-',
-            row.type === 'credit' || row.type === 'adjustment' ? formatCurrency(row.amount) : (row.type === 'waiver' ? `(Waiver) ${formatCurrency(row.amount)}` : '-'),
-            formatCurrency(Math.abs(row.runningPrincipal || 0)),
-            formatCurrency(row.runningInterest || 0)
-        ];
-    });
+    let tableHead = [];
+    let tableBody = [];
 
     if (mode === 'summarized') {
+        tableHead = [['Date', 'Remarks & Notes', 'Debit (-)', 'Credit (+)', 'Net Balance']];
+        tableBody = (ledger.rows || []).map(row => {
+            const dateStr = formatDate(row.date);
+            let remarks = (row.category ? `[${row.category}] ` : '') + (row.remarks || '');
+            if (row.type === 'debit') {
+                const phaseTag = formatPhaseSummaryBadge(getTxnInterestPhases(row));
+                if (phaseTag) remarks += ` [${phaseTag}]`;
+            } else if (row.type === 'credit' && row.paymentTrace) {
+                remarks += ` [Applied: ${row.paymentTrace}]`;
+            }
+
+            const debitStr = row.type === 'debit' ? formatCurrency(row.amount) : '-';
+            const creditStr = (row.type === 'credit' || row.type === 'adjustment') 
+                ? formatCurrency(row.amount) 
+                : (row.type === 'waiver' ? `(Waiver) ${formatCurrency(row.amount)}` : '-');
+            const netBalStr = formatCurrency(Math.abs(row.totalNet || row.runningPrincipal || 0));
+
+            return [dateStr, remarks, debitStr, creditStr, netBalStr];
+        });
+
+        // Single "Total Accrued Interest" line item at the bottom
         tableBody.push([
             '', 
             'TOTAL ACCRUED INTEREST', 
@@ -1407,19 +1462,61 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
             '', 
             formatCurrency(ledger.totalAccruedInterest)
         ]);
+    } else {
+        // Detailed Itemized Statement
+        tableHead = [['Date', 'Remarks & Notes', 'Principal', 'Active Interest Rule', 'Elapsed Days', 'Accrued Interest']];
+        const now = new Date();
+
+        tableBody = (ledger.rows || []).map(row => {
+            const dateStr = formatDate(row.date);
+            let remarks = (row.category ? `[${row.category}] ` : '') + (row.remarks || '');
+
+            let principalStr = '-';
+            let interestRuleStr = 'N/A';
+            let elapsedDaysStr = 'N/A';
+            let accruedInterestStr = '₹0.00';
+
+            if (row.type === 'debit') {
+                principalStr = formatCurrency(row.amount);
+                const iType = (row.interestType || customer.defaultInterestType || 'SIMPLE').toUpperCase();
+                const iRate = row.interestRate !== undefined ? row.interestRate : (customer.lendingRate || 12);
+                let freqStr = '';
+                if (iType === 'COMPOUND' || iType === 'COMPOUNDING') {
+                    const freq = (row.compoundingFrequency || customer.compoundingFrequency || 'MONTHLY').toLowerCase();
+                    freqStr = ` (${freq.charAt(0).toUpperCase() + freq.slice(1)})`;
+                }
+                interestRuleStr = `${iType}${freqStr} ${iRate}%`;
+
+                const startDate = row.interestStartDate ? new Date(row.interestStartDate) : (row.date ? new Date(row.date) : now);
+                const diffTime = Math.max(0, now - startDate);
+                const elapsedDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+                elapsedDaysStr = `${elapsedDays} days`;
+
+                const silo = (ledger.silos || []).find(s => s.id === row.id || s.date === row.date);
+                const accrued = silo ? silo.accruedInterest : (row.runningInterest || 0);
+                accruedInterestStr = formatCurrency(accrued);
+            } else if (row.type === 'credit') {
+                principalStr = `-${formatCurrency(row.amount)}`;
+                if (row.paymentTrace) remarks += ` [Applied: ${row.paymentTrace}]`;
+            } else if (row.type === 'waiver') {
+                principalStr = `(Waiver) -${formatCurrency(row.amount)}`;
+            } else if (row.type === 'adjustment') {
+                principalStr = `(Adj) -${formatCurrency(row.amount)}`;
+            }
+
+            return [dateStr, remarks, principalStr, interestRuleStr, elapsedDaysStr, accruedInterestStr];
+        });
     }
 
     doc.autoTable({
         startY: 60,
-        head: mode === 'detailed' 
-            ? [['Date', 'Remarks & Notes', 'Debit (-)', 'Credit (+)', 'Principal', 'Acc. Interest']] 
-            : [['Date', 'Remarks & Notes', 'Debit (-)', 'Credit (+)', 'Principal Balance']],
+        head: tableHead,
         body: tableBody,
         theme: 'striped',
         headStyles: { fillColor: [17, 24, 39] }
     });
 
-    doc.save(`Statement_${customer.name.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`);
+    doc.save(`Statement_${customer.name.replace(/\s+/g, '_')}_${mode}_${new Date().getTime()}.pdf`);
 }
 
 function downloadCustomerListPDF() {
@@ -1500,25 +1597,112 @@ if (btnPdfSummarized) {
     };
 }
 
-// Database Backup Logic
+// Database Excel / JSON Backup Logic
+function exportLedgerToExcel() {
+    if (!window.XLSX) {
+        console.warn("Excel export library unavailable. Falling back to JSON backup.");
+        downloadJsonBackup();
+        return;
+    }
+    try {
+        const wb = XLSX.utils.book_new();
+
+        // 1. Customers Sheet
+        const custData = (state.customers || []).map(c => {
+            const ledger = calculateLedger(c.id);
+            return {
+                "Customer ID": c.id,
+                "Customer Name": c.name,
+                "Phone Number": c.phoneNumber || "N/A",
+                "Lending Rate (%)": c.lendingRate || 12,
+                "Deposit Rate (%)": c.depositRate || 6,
+                "Principal Remaining (₹)": ledger.totalPrincipalRemaining,
+                "Accrued Interest (₹)": ledger.totalAccruedInterest,
+                "Net Balance (₹)": ledger.netOutstanding,
+                "Status": (ledger.status || "ACTIVE").toUpperCase()
+            };
+        });
+        const wsCustomers = XLSX.utils.json_to_sheet(custData);
+        XLSX.utils.book_append_sheet(wb, wsCustomers, "Customers Summary");
+
+        // 2. Transactions Sheet
+        const txnData = (state.transactions || []).map(t => {
+            const cust = state.customers.find(c => c.id === t.customerId);
+            return {
+                "Transaction ID": t.id,
+                "Customer Name": cust ? cust.name : "Unknown",
+                "Date": t.date ? formatDate(t.date) : "",
+                "Type": (t.type || "").toUpperCase(),
+                "Category": t.category || "Cash",
+                "Amount (₹)": t.amount || 0,
+                "Remarks": t.remarks || "",
+                "Interest Type": t.interestType || "SIMPLE",
+                "Interest Rate (%)": t.interestRate !== undefined ? t.interestRate : (cust ? cust.lendingRate : 12),
+                "Voided": t.isVoid ? "YES" : "NO"
+            };
+        });
+        const wsTxns = XLSX.utils.json_to_sheet(txnData);
+        XLSX.utils.book_append_sheet(wb, wsTxns, "Transactions History");
+
+        // 3. Inventory Stock Sheet (if items exist)
+        if (Array.isArray(state.items) && state.items.length > 0) {
+            const itemData = state.items.map(i => ({
+                "Item Name": i.name,
+                "Stock Quantity": i.qty || 0,
+                "Min Reorder Qty": i.minReorderQty || 5,
+                "Buy Price (₹)": i.buyPrice || 0,
+                "Sell Price (₹)": i.sellPrice || 0
+            }));
+            const wsItems = XLSX.utils.json_to_sheet(itemData);
+            XLSX.utils.book_append_sheet(wb, wsItems, "Inventory Stock");
+        }
+
+        // 4. Bills Sheet (if bills exist)
+        if (Array.isArray(state.bills) && state.bills.length > 0) {
+            const billData = state.bills.map(b => ({
+                "Bill ID": b.id,
+                "Customer Name": b.customerName || "Walk-in Customer",
+                "Date": b.date ? formatDate(b.date) : "",
+                "Total Amount (₹)": b.totalAmount || 0,
+                "Payment Mode": b.paymentMode || "CASH",
+                "Paid Amount (₹)": b.paidAmount || 0,
+                "Remaining Balance (₹)": b.remainingBalance || 0,
+                "Voided": b.isVoid ? "YES" : "NO"
+            }));
+            const wsBills = XLSX.utils.json_to_sheet(billData);
+            XLSX.utils.book_append_sheet(wb, wsBills, "Bills & Invoices");
+        }
+
+        const dateStr = new Date().toISOString().split('T')[0];
+        XLSX.writeFile(wb, `Kirana_Ledger_Backup_${dateStr}.xlsx`);
+    } catch (err) {
+        console.error("Excel Export Error:", err);
+        downloadJsonBackup();
+    }
+}
+
+function downloadJsonBackup() {
+    const dataStr = JSON.stringify(state, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    const dateStr = new Date().toISOString().split('T')[0];
+    a.download = `Kirana_Ledger_Backup_${dateStr}.json`;
+    document.body.appendChild(a);
+    a.click();
+    
+    setTimeout(() => {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    }, 0);
+}
+
 const btnBackupDb = document.getElementById('btn-backup-db');
 if (btnBackupDb) {
     btnBackupDb.onclick = () => {
-        const dataStr = JSON.stringify(state, null, 2);
-        const blob = new Blob([dataStr], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        const dateStr = new Date().toISOString().split('T')[0];
-        a.download = `Kirana_Ledger_Backup_${dateStr}.json`;
-        document.body.appendChild(a);
-        a.click();
-        
-        setTimeout(() => {
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-        }, 0);
+        exportLedgerToExcel();
     };
 }
 
