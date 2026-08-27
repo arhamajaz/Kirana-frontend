@@ -9,6 +9,7 @@ let state = {
         { id: 'cust-1', name: 'Ramesh Kumar', phoneNumber: '9876543210', lendingRate: 12, depositRate: 6 },
         { id: 'cust-2', name: 'Suresh Patel', phoneNumber: '9812345678', lendingRate: 12, depositRate: 6 }
     ],
+    badDebts: JSON.parse(localStorage.getItem('ml_pro_bad_debts')) || [],
     pagination: null,
     transactions: JSON.parse(localStorage.getItem('ml_pro_transactions')) || [],
     cashbook: JSON.parse(localStorage.getItem('ml_pro_cashbook')) || [],
@@ -28,6 +29,7 @@ function saveData() {
     try {
         localStorage.setItem('ml_pro_customers', JSON.stringify(state.customers || []));
         localStorage.setItem('ml_pro_transactions', JSON.stringify(state.transactions || []));
+        localStorage.setItem('ml_pro_bad_debts', JSON.stringify(state.badDebts || []));
         localStorage.setItem('ml_pro_cashbook', JSON.stringify(state.cashbook || []));
         localStorage.setItem('ml_pro_items', JSON.stringify(state.items || []));
         localStorage.setItem('ml_pro_bills', JSON.stringify(state.bills || []));
@@ -328,6 +330,8 @@ function switchView(targetId) {
         renderInsurance();
     } else if (targetId === 'reports-view') {
         renderReports();
+    } else if (targetId === 'bad-debts-view') {
+        renderBadDebtsView();
     } else if (targetId === 'calculator-view') {
         initStandaloneCalculator();
     }
@@ -354,7 +358,7 @@ function calculateLedger(customerId, asOfDateStr = null) {
     asOfDate.setHours(23, 59, 59, 999);
 
     const txns = (state.transactions || [])
-        .filter(t => t.customerId === customerId && !t.isVoid)
+        .filter(t => t.customerId === customerId && !t.isVoid && !t.isBadDebt)
         .filter(t => {
             const tDate = new Date(t.date);
             return isNaN(tDate.getTime()) || tDate <= asOfDate;
@@ -368,6 +372,7 @@ function calculateLedger(customerId, asOfDateStr = null) {
     let debitSilos = [];
     let excessCredit = 0;
     let computedLedgerRows = [];
+    let advanceLog = [];
 
     // Helper: Calculate interest accrued on a single Debit Silo between fromDate and toDate
     function calculateSiloInterest(silo, fromDate, toDate) {
@@ -450,10 +455,36 @@ function calculateLedger(customerId, asOfDateStr = null) {
 
     // Helper: Accrue interest on all active Debit Silos up to targetDate
     function updateAllSilosInterestUpTo(targetDate) {
+        const totalPrincipal = debitSilos.reduce((sum, s) => sum + s.principalRemaining, 0);
+        const netRunningPrincipal = totalPrincipal - excessCredit;
+
         debitSilos.forEach(silo => {
             if (silo.principalRemaining > 0) {
-                const addInt = calculateSiloInterest(silo, silo.lastInterestDate, targetDate);
-                silo.accruedInterest += addInt;
+                const fromDate = silo.lastInterestDate;
+                const toDate = targetDate;
+
+                if (fromDate && toDate && fromDate < toDate) {
+                    const days = (toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24);
+
+                    if (netRunningPrincipal > 0) {
+                        // Customer owes Merchant -> Accrue interest at configured rate
+                        const addInt = calculateSiloInterest(silo, fromDate, toDate);
+                        silo.accruedInterest += addInt;
+                    } else if (days > 0) {
+                        // Merchant owes Customer / Advance State -> Halt interest accrual (strictly 0%)
+                        silo.hasAdvancePeriod = true;
+                        advanceLog.push({
+                            siloId: silo.id,
+                            customerId: customerId,
+                            fromDate: new Date(fromDate),
+                            toDate: new Date(toDate),
+                            days: Math.round(days),
+                            advanceAmount: Math.abs(netRunningPrincipal),
+                            rate: '0%',
+                            interestAccrued: 0
+                        });
+                    }
+                }
                 silo.lastInterestDate = new Date(Math.max(silo.lastInterestDate.getTime(), targetDate.getTime()));
             }
         });
@@ -481,7 +512,8 @@ function calculateLedger(customerId, asOfDateStr = null) {
                 accruedInterest: 0,
                 interestPhases: getTxnInterestPhases(txn, defaultLendingRate),
                 remarks: txn.remarks,
-                category: txn.category
+                category: txn.category,
+                hasAdvancePeriod: false
             };
 
             if (excessCredit > 0) {
@@ -616,6 +648,9 @@ function calculateLedger(customerId, asOfDateStr = null) {
         isDebt: netOutstanding > 0,
         status,
         silos: debitSilos,
+        excessCredit,
+        advanceLog,
+        hasAdvancePeriod: advanceLog.length > 0 || (excessCredit > 0),
         rows: computedLedgerRows.reverse()
     };
 
@@ -669,9 +704,14 @@ function renderDashboard(searchTerm = '') {
             <td>${statusBadge}</td>
             <td class="text-right ${netClass}"><strong>${formatCurrency(Math.abs(ledger.totalNet))}</strong> ${ledger.totalNet < 0 ? '(Cr)' : (ledger.totalNet > 0 ? '(Dr)' : '')}</td>
             <td class="text-right">
-                <button class="btn-icon" onclick="event.stopPropagation(); editCustomer('${customer.id}')">
+                <button class="btn-icon" onclick="event.stopPropagation(); editCustomer('${customer.id}')" title="Edit Customer">
                     <i class="ph ph-pencil-simple"></i>
                 </button>
+                ${ledger.totalNet > 0 ? `
+                    <button class="btn-icon text-danger" onclick="event.stopPropagation(); openMarkBadDebtModal('${customer.id}')" title="Mark as Bad Debt (डूबत)">
+                        <i class="ph ph-warning"></i>
+                    </button>
+                ` : ''}
             </td>
         `;
         tbody.appendChild(tr);
@@ -828,10 +868,14 @@ function renderLedger() {
             <td class="text-right">
                 ${row.isVoid 
                     ? `<span class="text-secondary" style="font-size: 0.8rem;">Reversed</span>`
-                    : `
-                        <button class="btn-icon" onclick="editTransaction('${row.id}')" title="Edit Transaction" style="margin-right: 4px;"><i class="ph ph-pencil-simple"></i></button>
-                        <button class="btn-icon text-danger" onclick="openVoidModal('txn', '${row.id}')" title="Void / Reverse Transaction"><i class="ph ph-prohibit"></i></button>
-                    `
+                    : (row.isBadDebt 
+                        ? `<span class="status-badge status-baddebt">WRITTEN OFF</span>`
+                        : `
+                            <button class="btn-icon" onclick="editTransaction('${row.id}')" title="Edit Transaction" style="margin-right: 4px;"><i class="ph ph-pencil-simple"></i></button>
+                            <button class="btn-icon text-danger" onclick="openVoidModal('txn', '${row.id}')" title="Void / Reverse Transaction" style="margin-right: 4px;"><i class="ph ph-prohibit"></i></button>
+                            ${row.type === 'debit' ? `<button class="btn-icon text-danger" onclick="openMarkBadDebtModal('${state.currentCustomerId}', '${row.id}')" title="Mark Txn as Bad Debt (डूबत)"><i class="ph ph-warning"></i></button>` : ''}
+                        `
+                    )
                 }
             </td>
         `;
@@ -1485,14 +1529,15 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
                     const freq = (row.compoundingFrequency || customer.compoundingFrequency || 'MONTHLY').toLowerCase();
                     freqStr = ` (${freq.charAt(0).toUpperCase() + freq.slice(1)})`;
                 }
-                interestRuleStr = `${iType}${freqStr} ${iRate}%`;
+                const silo = (ledger.silos || []).find(s => s.id === row.id || s.date === row.date);
+                const hasAdv = silo ? silo.hasAdvancePeriod : false;
+                interestRuleStr = `${iType}${freqStr} ${iRate}%${hasAdv ? ' (0% on Advance)' : ''}`;
 
                 const startDate = row.interestStartDate ? new Date(row.interestStartDate) : (row.date ? new Date(row.date) : now);
                 const diffTime = Math.max(0, now - startDate);
                 const elapsedDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
                 elapsedDaysStr = `${elapsedDays} days`;
 
-                const silo = (ledger.silos || []).find(s => s.id === row.id || s.date === row.date);
                 const accrued = silo ? silo.accruedInterest : (row.runningInterest || 0);
                 accruedInterestStr = formatCurrency(accrued);
             } else if (row.type === 'credit') {
@@ -1515,6 +1560,13 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
         theme: 'striped',
         headStyles: { fillColor: [17, 24, 39] }
     });
+
+    if (ledger.hasAdvancePeriod || (ledger.advanceLog || []).length > 0) {
+        const finalY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 10 : 200;
+        doc.setFontSize(8.5);
+        doc.setTextColor(180, 83, 9);
+        doc.text("* Note: Interest accrual was automatically paused (0% rate) during periods when running balance was in Advance/Credit state.", 14, finalY);
+    }
 
     doc.save(`Statement_${customer.name.replace(/\s+/g, '_')}_${mode}_${new Date().getTime()}.pdf`);
 }
@@ -2991,14 +3043,33 @@ function showInterestBreakdown(txnId) {
     const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
     const toDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
     toDate.setHours(23, 59, 59, 999);
-    
+
+    const ledger = calculateLedger(txn.customerId, asOfDateStr);
+    const silo = (ledger.silos || []).find(s => s.id === txn.id);
+
     const phases = getTxnInterestPhases(txn, defaultLendingRate);
     let currentPrincipal = txn.amount;
     const siloStart = new Date(txn.date);
     
     let html = '';
     let totalAccrued = 0;
-    
+
+    // Display Advance Credit Balance Banners if advance periods occurred
+    const advanceEntries = (ledger.advanceLog || []).filter(a => a.siloId === txn.id || a.customerId === txn.customerId);
+    if (advanceEntries.length > 0) {
+        advanceEntries.forEach(adv => {
+            html += `
+            <div class="breakdown-step advance-step" style="border-left: 4px solid #f59e0b; background: rgba(245, 158, 11, 0.08); padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                <h4 style="margin: 0 0 4px 0; color: #d97706;"><i class="ph ph-pause-circle"></i> Interest Paused (Advance Credit Balance 0%)</h4>
+                <p style="margin: 2px 0;"><strong>Period:</strong> ${formatDate(adv.fromDate)} to ${formatDate(adv.toDate)} (${adv.days} days)</p>
+                <p style="margin: 2px 0;"><strong>Running Advance Balance:</strong> ${formatCurrency(adv.advanceAmount)} (Cr)</p>
+                <div class="formula" style="margin-top: 6px; font-weight: 600; color: var(--text-primary);">
+                    ${formatDate(adv.fromDate)} to ${formatDate(adv.toDate)}: ${formatCurrency(adv.advanceAmount)} (Advance) × 0% = <strong>₹0.00</strong>
+                </div>
+            </div>`;
+        });
+    }
+
     for (let i = 0; i < phases.length; i++) {
         const phase = phases[i];
         
@@ -3062,11 +3133,432 @@ function showInterestBreakdown(txnId) {
             currentPrincipal += phaseInterest;
         }
     }
+
+    const actualAccrued = silo ? silo.accruedInterest : totalAccrued;
     
-    html += `<div style="text-align: right; padding: 12px 12px 0 0; font-size: 1.1rem;"><strong>Total Accrued: ₹${formatCurrency(totalAccrued)}</strong></div>`;
+    html += `<div style="text-align: right; padding: 12px 12px 0 0; font-size: 1.1rem;"><strong>Actual Net Accrued: ₹${formatCurrency(actualAccrued)}</strong></div>`;
     
     document.getElementById('interest-breakdown-body').innerHTML = html || '<p>No interest accrued yet.</p>';
     toggleModal('interest-breakdown-modal', true);
 }
 
 document.getElementById('ledger-as-of-date')?.addEventListener('change', renderLedger);
+
+// ==========================================
+// BAD DEBTS & NPA (डूबत खाता) MODULE ENGINE
+// ==========================================
+
+function renderBadDebtsView() {
+    const searchInput = document.getElementById('bad-debts-search');
+    const searchTerm = searchInput ? searchInput.value.trim().toLowerCase() : '';
+
+    let totalWrittenOff = 0;
+    let totalRecovered = 0;
+    const badDebtsList = state.badDebts || [];
+
+    badDebtsList.forEach(bd => {
+        totalWrittenOff += (parseFloat(bd.writtenOffAmount) || 0);
+        totalRecovered += (parseFloat(bd.totalRecovered) || 0);
+    });
+
+    const netBadDebt = Math.max(0, totalWrittenOff - totalRecovered);
+
+    const totalEl = document.getElementById('summary-bad-debt-total');
+    const countEl = document.getElementById('summary-bad-debt-count');
+    const recEl = document.getElementById('summary-bad-debt-recovered');
+
+    if (totalEl) totalEl.textContent = formatCurrency(totalWrittenOff);
+    if (countEl) countEl.textContent = badDebtsList.length;
+    if (recEl) recEl.textContent = formatCurrency(totalRecovered);
+
+    const tbody = document.getElementById('bad-debts-list-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const filtered = badDebtsList.filter(bd => 
+        (bd.customerName && bd.customerName.toLowerCase().includes(searchTerm)) ||
+        (bd.phoneNumber && bd.phoneNumber.includes(searchTerm)) ||
+        (bd.reason && bd.reason.toLowerCase().includes(searchTerm))
+    );
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-secondary" style="padding: 2rem;">No defaulted accounts recorded in Bad Debts store.</td></tr>`;
+        return;
+    }
+
+    filtered.forEach(bd => {
+        const remaining = Math.max(0, (bd.writtenOffAmount || 0) - (bd.totalRecovered || 0));
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>
+                <strong>${bd.customerName}</strong>
+                ${bd.reason ? `<br><small class="text-secondary">Note: ${bd.reason}</small>` : ''}
+            </td>
+            <td>${bd.phoneNumber || 'N/A'}</td>
+            <td class="text-right text-danger"><strong>${formatCurrency(bd.writtenOffAmount)}</strong></td>
+            <td class="text-right text-success">${formatCurrency(bd.totalRecovered || 0)}</td>
+            <td class="text-right font-bold ${remaining > 0 ? 'text-danger' : 'text-success'}">${formatCurrency(remaining)}</td>
+            <td>${formatDate(bd.writtenOffDate)}</td>
+            <td class="text-right">
+                <button class="btn-outline btn-sm" onclick="openBadDebtDetail('${bd.id}')" style="margin-right: 4px;">
+                    <i class="ph ph-eye"></i> Detail
+                </button>
+                ${remaining > 0 ? `
+                    <button class="btn-primary btn-sm" onclick="openBadDebtRecoveryModal('${bd.id}')">
+                        <i class="ph ph-hand-coins"></i> Recovery
+                    </button>
+                ` : `<span class="status-badge status-active">SETTLED</span>`}
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function openMarkBadDebtModal(customerId, txnId = null) {
+    if (!customerId) return;
+    const customer = state.customers.find(c => c.id === customerId);
+    if (!customer) return;
+
+    document.getElementById('mark-bad-debt-cust-id').value = customerId;
+    document.getElementById('mark-bad-debt-txn-id').value = txnId || '';
+    document.getElementById('mark-bad-debt-cust-name').value = customer.name;
+
+    const amountInput = document.getElementById('mark-bad-debt-amount');
+
+    if (txnId) {
+        const txn = (state.transactions || []).find(t => t.id === txnId);
+        if (txn) {
+            amountInput.value = txn.amount || 0;
+        }
+    } else {
+        const ledger = calculateLedger(customerId);
+        amountInput.value = Math.max(0, ledger.netOutstanding);
+    }
+
+    toggleModal('mark-bad-debt-modal', true);
+}
+
+function handleMarkBadDebtSubmit(e) {
+    e.preventDefault();
+    const customerId = document.getElementById('mark-bad-debt-cust-id').value;
+    const txnId = document.getElementById('mark-bad-debt-txn-id').value;
+    const amount = parseFloat(document.getElementById('mark-bad-debt-amount').value) || 0;
+    const reason = document.getElementById('mark-bad-debt-reason').value.trim();
+
+    if (!customerId || amount <= 0) return;
+
+    const customer = state.customers.find(c => c.id === customerId);
+    const writeOffDate = new Date().toISOString();
+
+    if (txnId) {
+        const txn = (state.transactions || []).find(t => t.id === txnId);
+        if (txn) {
+            txn.isBadDebt = true;
+            txn.writtenOffDate = writeOffDate;
+            txn.badDebtReason = reason;
+        }
+    } else {
+        // Mark all unpaid debits as Bad Debt
+        (state.transactions || []).forEach(t => {
+            if (t.customerId === customerId && t.type === 'debit' && !t.isVoid) {
+                t.isBadDebt = true;
+                t.writtenOffDate = writeOffDate;
+                t.badDebtReason = reason;
+            }
+        });
+    }
+
+    // Replicate / update in Bad Debts store
+    let badDebtRecord = (state.badDebts || []).find(bd => bd.customerId === customerId);
+    if (!badDebtRecord) {
+        badDebtRecord = {
+            id: 'bd-' + Date.now(),
+            customerId: customerId,
+            customerName: customer ? customer.name : 'Unknown Customer',
+            phoneNumber: customer ? (customer.phoneNumber || 'N/A') : 'N/A',
+            writtenOffAmount: 0,
+            writtenOffDate: writeOffDate,
+            reason: reason || 'Uncollectible Bad Debt Write-Off',
+            recoveries: [],
+            totalRecovered: 0
+        };
+        state.badDebts = state.badDebts || [];
+        state.badDebts.push(badDebtRecord);
+    }
+
+    badDebtRecord.writtenOffAmount = Math.round((badDebtRecord.writtenOffAmount + amount) * 100) / 100;
+    if (reason) badDebtRecord.reason = reason;
+
+    saveData();
+    toggleModal('mark-bad-debt-modal', false);
+    e.target.reset();
+
+    if (state.currentCustomerId === customerId) {
+        renderLedger();
+    }
+    renderDashboard();
+    renderBadDebtsView();
+}
+
+function openBadDebtDetail(badDebtId) {
+    const bd = (state.badDebts || []).find(b => b.id === badDebtId);
+    if (!bd) return;
+
+    const remaining = Math.max(0, (bd.writtenOffAmount || 0) - (bd.totalRecovered || 0));
+    const container = document.getElementById('bad-debt-detail-content');
+    if (!container) return;
+
+    const recoveriesHtml = (bd.recoveries && bd.recoveries.length > 0)
+        ? bd.recoveries.map(r => `
+            <tr>
+                <td>${formatDate(r.date)}</td>
+                <td>${r.remarks || 'Vasooli'}</td>
+                <td class="text-right text-success"><strong>${formatCurrency(r.amount)}</strong></td>
+            </tr>
+          `).join('')
+        : `<tr><td colspan="3" class="text-center text-secondary">No recoveries recorded yet.</td></tr>`;
+
+    const txns = (state.transactions || []).filter(t => t.customerId === bd.customerId && t.isBadDebt);
+    const txnsHtml = (txns && txns.length > 0)
+        ? txns.map(t => `
+            <tr>
+                <td>${formatDate(t.date)}</td>
+                <td>[${t.category || 'Cash'}] ${t.remarks || ''}</td>
+                <td class="text-right text-danger">${formatCurrency(t.amount)}</td>
+                <td><span class="status-badge status-baddebt">WRITTEN OFF</span></td>
+            </tr>
+          `).join('')
+        : `<tr><td colspan="4" class="text-center text-secondary">Full balance write-off.</td></tr>`;
+
+    container.innerHTML = `
+        <div class="bad-debt-card-header">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <h3 style="margin: 0; color: var(--text-primary);">${bd.customerName}</h3>
+                    <p style="margin: 4px 0 0 0; font-size: 0.9rem;" class="text-secondary"><i class="ph ph-phone"></i> ${bd.phoneNumber || 'N/A'} | Written Off: ${formatDate(bd.writtenOffDate)}</p>
+                    ${bd.reason ? `<p style="margin: 4px 0 0 0; font-size: 0.85rem;" class="text-danger">Reason: ${bd.reason}</p>` : ''}
+                </div>
+                ${remaining > 0 ? `
+                    <button class="btn-primary" onclick="toggleModal('bad-debt-detail-modal', false); openBadDebtRecoveryModal('${bd.id}')">
+                        <i class="ph ph-hand-coins"></i> Record Recovery (Vasooli)
+                    </button>
+                ` : `<span class="status-badge status-active">FULLY SETTLED</span>`}
+            </div>
+        </div>
+
+        <div class="metrics-grid" style="margin-bottom: 1rem; grid-template-columns: repeat(3, 1fr);">
+            <div class="metric-card" style="padding: 12px;">
+                <span class="metric-title" style="font-size: 0.8rem;">Written-Off Amount</span>
+                <div class="metric-value text-danger" style="font-size: 1.2rem;">${formatCurrency(bd.writtenOffAmount)}</div>
+            </div>
+            <div class="metric-card" style="padding: 12px;">
+                <span class="metric-title" style="font-size: 0.8rem;">Total Recovered</span>
+                <div class="metric-value text-success" style="font-size: 1.2rem;">${formatCurrency(bd.totalRecovered || 0)}</div>
+            </div>
+            <div class="metric-card" style="padding: 12px;">
+                <span class="metric-title" style="font-size: 0.8rem;">Remaining Debt</span>
+                <div class="metric-value ${remaining > 0 ? 'text-danger' : 'text-success'}" style="font-size: 1.2rem;">${formatCurrency(remaining)}</div>
+            </div>
+        </div>
+
+        <h4 style="margin: 1rem 0 0.5rem 0;"><i class="ph ph-hand-coins text-success"></i> Recovery History Log (Vasooli)</h4>
+        <div class="table-responsive" style="margin-bottom: 1.5rem;">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Remarks / Mode</th>
+                        <th class="text-right">Amount Recovered</th>
+                    </tr>
+                </thead>
+                <tbody>${recoveriesHtml}</tbody>
+            </table>
+        </div>
+
+        <h4 style="margin: 1rem 0 0.5rem 0;"><i class="ph ph-warning text-danger"></i> Quarantined Transactions</h4>
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Original Date</th>
+                        <th>Remarks / Category</th>
+                        <th class="text-right">Amount</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>${txnsHtml}</tbody>
+            </table>
+        </div>
+    `;
+
+    toggleModal('bad-debt-detail-modal', true);
+}
+
+function openBadDebtRecoveryModal(badDebtId) {
+    const bd = (state.badDebts || []).find(b => b.id === badDebtId);
+    if (!bd) return;
+
+    document.getElementById('recovery-bad-debt-id').value = badDebtId;
+    const remaining = Math.max(0, (bd.writtenOffAmount || 0) - (bd.totalRecovered || 0));
+
+    const amtInput = document.getElementById('recovery-amount');
+    if (amtInput) {
+        amtInput.value = remaining;
+        amtInput.max = remaining;
+    }
+
+    toggleModal('bad-debt-recovery-modal', true);
+}
+
+function handleBadDebtRecoverySubmit(e) {
+    e.preventDefault();
+    const badDebtId = document.getElementById('recovery-bad-debt-id').value;
+    const amount = parseFloat(document.getElementById('recovery-amount').value) || 0;
+    const remarks = document.getElementById('recovery-remarks').value.trim();
+
+    if (!badDebtId || amount <= 0) return;
+
+    const bd = (state.badDebts || []).find(b => b.id === badDebtId);
+    if (!bd) return;
+
+    // 1. Record Recovery in Bad Debt Store
+    const recoveryEntry = {
+        id: 'rec-' + Date.now(),
+        date: new Date().toISOString(),
+        amount: amount,
+        remarks: remarks || 'Vasooli Recovery Payment'
+    };
+
+    bd.recoveries = bd.recoveries || [];
+    bd.recoveries.push(recoveryEntry);
+    bd.totalRecovered = Math.round(((bd.totalRecovered || 0) + amount) * 100) / 100;
+
+    // 2. Accounting Sync: Automatically add to Cashbook
+    state.cashbook = state.cashbook || [];
+    state.cashbook.push({
+        id: 'cb-rec-' + Date.now(),
+        date: new Date().toISOString(),
+        type: 'in',
+        amount: amount,
+        category: 'Bad Debt Recovery (Income)',
+        remarks: `Bad Debt Recovery from ${bd.customerName} (${remarks || 'Vasooli'})`
+    });
+
+    saveData();
+    toggleModal('bad-debt-recovery-modal', false);
+    e.target.reset();
+
+    renderBadDebtsView();
+    if (document.getElementById('cashbook-view')?.classList.contains('active')) {
+        renderCashbook();
+    }
+}
+
+// --- BAD DEBTS EXPORT FUNCTIONS ---
+function downloadBadDebtsPDF() {
+    if (!window.jspdf) {
+        alert("PDF generator library loading. Please try again in a moment.");
+        return;
+    }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    doc.setFontSize(20);
+    doc.text("Malwa Grain Merchants", 14, 20);
+    doc.setFontSize(12);
+    doc.text("Bad Debts & NPA Write-Off Summary Report", 14, 28);
+    doc.setFontSize(10);
+    doc.text(`Generated On: ${formatDate(new Date())}`, 14, 36);
+
+    let totalWritten = 0;
+    let totalRec = 0;
+
+    const tableBody = (state.badDebts || []).map(bd => {
+        const remaining = Math.max(0, (bd.writtenOffAmount || 0) - (bd.totalRecovered || 0));
+        totalWritten += bd.writtenOffAmount;
+        totalRec += (bd.totalRecovered || 0);
+
+        return [
+            bd.customerName,
+            bd.phoneNumber || 'N/A',
+            formatCurrency(bd.writtenOffAmount),
+            formatCurrency(bd.totalRecovered || 0),
+            formatCurrency(remaining),
+            formatDate(bd.writtenOffDate),
+            remaining > 0 ? 'DEFAULTED' : 'SETTLED'
+        ];
+    });
+
+    tableBody.push([
+        'TOTALS',
+        '-',
+        formatCurrency(totalWritten),
+        formatCurrency(totalRec),
+        formatCurrency(Math.max(0, totalWritten - totalRec)),
+        '-',
+        '-'
+    ]);
+
+    doc.autoTable({
+        startY: 42,
+        head: [['Customer Name', 'Phone', 'Written-Off Amount', 'Recovered Amount', 'Remaining Debt', 'Date Written Off', 'Status']],
+        body: tableBody,
+        theme: 'grid',
+        headStyles: { fillColor: [185, 28, 28] }
+    });
+
+    doc.save(`Bad_Debts_NPA_Report_${new Date().getTime()}.pdf`);
+}
+
+function exportBadDebtsToExcel() {
+    if (!window.XLSX) {
+        alert("Excel export library loading. Please try again in a moment.");
+        return;
+    }
+    try {
+        const wb = XLSX.utils.book_new();
+
+        // 1. Defaulted Accounts Sheet
+        const summaryData = (state.badDebts || []).map(bd => ({
+            "Bad Debt ID": bd.id,
+            "Customer Name": bd.customerName,
+            "Phone Number": bd.phoneNumber || "N/A",
+            "Written Off Amount (₹)": bd.writtenOffAmount,
+            "Total Recovered (₹)": bd.totalRecovered || 0,
+            "Remaining Bad Debt (₹)": Math.max(0, (bd.writtenOffAmount || 0) - (bd.totalRecovered || 0)),
+            "Date Written Off": formatDate(bd.writtenOffDate),
+            "Reason": bd.reason || "Default"
+        }));
+        const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+        XLSX.utils.book_append_sheet(wb, wsSummary, "Defaulted Accounts");
+
+        // 2. Recovery Log Sheet
+        const recoveryData = [];
+        (state.badDebts || []).forEach(bd => {
+            (bd.recoveries || []).forEach(r => {
+                recoveryData.push({
+                    "Bad Debt ID": bd.id,
+                    "Customer Name": bd.customerName,
+                    "Recovery Date": formatDate(r.date),
+                    "Amount Recovered (₹)": r.amount,
+                    "Remarks / Mode": r.remarks || "Vasooli"
+                });
+            });
+        });
+        if (recoveryData.length > 0) {
+            const wsRecovery = XLSX.utils.json_to_sheet(recoveryData);
+            XLSX.utils.book_append_sheet(wb, wsRecovery, "Recovery History Log");
+        }
+
+        const dateStr = new Date().toISOString().split('T')[0];
+        XLSX.writeFile(wb, `Kirana_Bad_Debts_NPA_Backup_${dateStr}.xlsx`);
+    } catch (err) {
+        console.error("Bad Debt Excel Export Error:", err);
+    }
+}
+
+// Attach Form and Export Event Handlers for Bad Debts Module
+document.getElementById('mark-bad-debt-form')?.addEventListener('submit', handleMarkBadDebtSubmit);
+document.getElementById('bad-debt-recovery-form')?.addEventListener('submit', handleBadDebtRecoverySubmit);
+document.getElementById('btn-export-bad-debts-pdf')?.addEventListener('click', downloadBadDebtsPDF);
+document.getElementById('btn-export-bad-debts-excel')?.addEventListener('click', exportBadDebtsToExcel);

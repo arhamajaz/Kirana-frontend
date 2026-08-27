@@ -104,6 +104,9 @@
                 <button class="nav-tab" data-target="reports-view">
                     <i class="ph ph-chart-line-up"></i> Reports
                 </button>
+                <button class="nav-tab" data-target="bad-debts-view">
+                    <i class="ph ph-warning-circle"></i> Bad Debts
+                </button>
                 <button class="nav-tab" data-target="more-view">
                     <i class="ph ph-dots-three-circle"></i> More
                 </button>
@@ -268,6 +271,12 @@
                         </div>
                         <span>Calculator</span>
                     </div>
+                    <div class="grid-card" data-target="bad-debts-view">
+                        <div class="icon-circle icon-red">
+                            <i class="ph ph-warning-circle"></i>
+                        </div>
+                        <span>Bad Debts / NPA</span>
+                    </div>
                 </div>
 
                 <div class="more-menu-list">
@@ -284,6 +293,83 @@
                             <span>Help & Support</span>
                         </div>
                         <i class="ph ph-caret-right menu-arrow"></i>
+                    </div>
+                </div>
+            </section>
+
+            <!-- BAD DEBTS / NPA VIEW -->
+            <section id="bad-debts-view" class="view hidden tab-content">
+                <div class="header-actions" style="margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <h2><i class="ph ph-warning-circle text-danger"></i> Bad Debts & NPA (डूबत खाता)</h2>
+                        <p class="text-secondary">Quarantined Defaulted Accounts & Written-off Ledgers</p>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button id="btn-export-bad-debts-excel" class="btn-outline">
+                            <i class="ph ph-file-xls"></i> Export Excel
+                        </button>
+                        <button id="btn-export-bad-debts-pdf" class="btn-primary">
+                            <i class="ph ph-file-pdf"></i> Export PDF
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Metrics Cards -->
+                <div class="metrics-grid" style="margin-bottom: 1.5rem;">
+                    <div class="metric-card">
+                        <div class="metric-header">
+                            <span class="metric-title">Total Bad Debts Written Off</span>
+                            <i class="ph ph-warning icon-red"></i>
+                        </div>
+                        <div class="metric-value text-danger" id="summary-bad-debt-total">₹0.00</div>
+                        <span class="metric-subtitle">Total quarantined debt</span>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-header">
+                            <span class="metric-title">Defaulted Accounts</span>
+                            <i class="ph ph-users icon-orange"></i>
+                        </div>
+                        <div class="metric-value" id="summary-bad-debt-count">0</div>
+                        <span class="metric-subtitle">Customers in write-off store</span>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-header">
+                            <span class="metric-title">Recovered Amount (वसूल)</span>
+                            <i class="ph ph-hand-coins icon-green"></i>
+                        </div>
+                        <div class="metric-value text-success" id="summary-bad-debt-recovered">₹0.00</div>
+                        <span class="metric-subtitle">Total settlements & recoveries</span>
+                    </div>
+                </div>
+
+                <!-- Search & Table -->
+                <div class="card" style="padding: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; gap: 1rem; flex-wrap: wrap;">
+                        <div class="search-bar" style="max-width: 350px;">
+                            <i class="ph ph-magnifying-glass"></i>
+                            <input type="text" id="bad-debts-search" placeholder="Search defaulted customer or phone...">
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Profile</th>
+                                    <th>Phone</th>
+                                    <th>Written Off Amount</th>
+                                    <th>Recovered (वसूल)</th>
+                                    <th>Remaining Bad Debt</th>
+                                    <th>Date Written Off</th>
+                                    <th class="text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bad-debts-list-body">
+                                <tr>
+                                    <td colspan="7" class="text-center text-secondary" style="padding: 2rem;">No defaulted accounts recorded in Bad Debts store.</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </section>
@@ -1130,6 +1216,77 @@
                     <span style="font-size: 0.85rem; font-weight: normal; color: var(--text-secondary);">Rows only show Principal transactions. Total accrued interest is displayed as a single line item at the bottom.</span>
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- Mark as Bad Debt Modal -->
+    <div id="mark-bad-debt-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3><i class="ph ph-warning text-danger"></i> Mark as Bad Debt (डूबत खाता)</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <form id="mark-bad-debt-form">
+                <input type="hidden" id="mark-bad-debt-cust-id">
+                <input type="hidden" id="mark-bad-debt-txn-id">
+                <div class="form-group">
+                    <label>Customer Name</label>
+                    <input type="text" id="mark-bad-debt-cust-name" readonly style="background: var(--bg-card); cursor: not-allowed;">
+                </div>
+                <div class="form-group">
+                    <label>Amount to Write Off (₹)</label>
+                    <input type="number" id="mark-bad-debt-amount" step="0.01" min="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label>Reason / Write-off Notes</label>
+                    <textarea id="mark-bad-debt-reason" rows="2" placeholder="Customer default, untraceable, dispute..."></textarea>
+                </div>
+                <div style="background: rgba(239, 68, 68, 0.1); padding: 12px; border-radius: 6px; margin-bottom: 1rem; border-left: 4px solid var(--danger);">
+                    <small class="text-danger">
+                        <i class="ph ph-info"></i> Writing off this debt quarantines it into the Bad Debts module and isolates it from main active balance calculations.
+                    </small>
+                </div>
+                <button type="submit" class="btn-primary full-width style-danger">
+                    <i class="ph ph-prohibit"></i> Confirm Write-Off to Bad Debt
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Bad Debt Ledger Detail Modal -->
+    <div id="bad-debt-detail-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 750px;">
+            <div class="modal-header">
+                <h3><i class="ph ph-warning-circle text-danger"></i> Bad Debt Ledger Detail</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <div id="bad-debt-detail-content" style="padding: 16px 0;">
+                <!-- Dynamically rendered -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Bad Debt Recovery / Vasooli Modal -->
+    <div id="bad-debt-recovery-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <h3><i class="ph ph-hand-coins text-success"></i> Record Debt Recovery (वसूल)</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <form id="bad-debt-recovery-form">
+                <input type="hidden" id="recovery-bad-debt-id">
+                <div class="form-group">
+                    <label for="recovery-amount">Recovered Amount (₹)</label>
+                    <input type="number" id="recovery-amount" step="0.01" min="1" placeholder="Enter amount recovered" required>
+                </div>
+                <div class="form-group">
+                    <label for="recovery-remarks">Payment Mode / Remarks</label>
+                    <input type="text" id="recovery-remarks" placeholder="Cash, UPI, Settlement notes...">
+                </div>
+                <button type="submit" class="btn-primary full-width" style="margin-top: 1rem;">
+                    <i class="ph ph-check-circle"></i> Save Recovery & Sync Cashbook
+                </button>
+            </form>
         </div>
     </div>
 

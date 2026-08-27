@@ -1673,3 +1673,29 @@ input:focus, select:focus, textarea:focus {
         border-radius: 12px;
     }
 }
+
+/* --- BAD DEBTS MODULE STYLES --- */
+.status-baddebt {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.style-danger {
+    background-color: #ef4444 !important;
+    color: #ffffff !important;
+    border-color: #ef4444 !important;
+}
+
+.style-danger:hover {
+    background-color: #dc2626 !important;
+    border-color: #dc2626 !important;
+}
+
+.bad-debt-card-header {
+    background: rgba(239, 68, 68, 0.08);
+    padding: 16px;
+    border-radius: 8px;
+    border-left: 4px solid #ef4444;
+    margin-bottom: 16px;
+}
