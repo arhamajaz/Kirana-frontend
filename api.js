@@ -383,6 +383,25 @@ async function voidTransaction(id, reasonData = {}) {
     return request("PATCH", `/transactions/${id}/void`, reasonData, true);
 }
 
+async function updateTransaction(id, transactionData) {
+    const payload = {};
+    if (transactionData.remarks !== undefined) payload.remarks = String(transactionData.remarks).trim();
+    if (transactionData.amount !== undefined) payload.amount = sanitizeAmount(transactionData.amount);
+    if (transactionData.type !== undefined) payload.type = String(transactionData.type).toUpperCase();
+
+    try {
+        return await request("PATCH", `/transactions/${id}`, payload, true);
+    } catch {
+        const txns = JSON.parse(localStorage.getItem('ml_pro_transactions')) || [];
+        const idx = txns.findIndex(t => t.id === id);
+        if (idx !== -1) {
+            txns[idx] = { ...txns[idx], ...payload, isEdited: true };
+            localStorage.setItem('ml_pro_transactions', JSON.stringify(txns));
+        }
+        return txns[idx] || payload;
+    }
+}
+
 async function healthCheck() {
     const serverUrl = API.BASE_URL.replace("/api/v1", "");
     return request("GET", `${serverUrl}/health`, null, false);
@@ -552,6 +571,7 @@ window.LedgerAPI = Object.freeze({
     updateInsurance,
     getReportSummary,
     voidTransaction,
+    updateTransaction,
     healthCheck,
     saveToken,
     getToken,

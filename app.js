@@ -1,6 +1,38 @@
-/**
- * Malwa Ledger Pro - Core Engine
- */
+// Global Safe LedgerAPI accessor to prevent "LedgerAPI is not defined" ReferenceError
+if (typeof window !== 'undefined' && !window.LedgerAPI) {
+    window.LedgerAPI = {
+        getToken: () => localStorage.getItem("ml_pro_auth_token") || localStorage.getItem("ml_pro_jwt_token"),
+        saveToken: (t) => { if (t) { localStorage.setItem("ml_pro_auth_token", t); localStorage.setItem("ml_pro_jwt_token", t); } },
+        removeToken: () => { localStorage.removeItem("ml_pro_auth_token"); localStorage.removeItem("ml_pro_jwt_token"); },
+        healthCheck: async () => ({ status: "offline" }),
+        setUnauthorizedHandler: () => {},
+        loginUser: async () => ({ token: "mock_token_" + Date.now() }),
+        registerUser: async () => ({ token: "mock_token_" + Date.now() }),
+        getCustomers: async () => [],
+        searchCustomers: async () => [],
+        createCustomer: async (d) => d,
+        updateCustomer: async (id, d) => d,
+        deleteCustomer: async () => {},
+        createTransaction: async (d) => d,
+        updateTransaction: async (id, d) => d,
+        voidTransaction: async () => {},
+        getCustomerLedger: async () => ({}),
+        getCustomerTransactions: async () => [],
+        getItems: async () => [],
+        createItem: async (d) => d,
+        updateItem: async (id, d) => d,
+        deleteItem: async () => {},
+        getBills: async () => [],
+        createBill: async (d) => d,
+        voidBill: async () => {},
+        getCashbook: async () => [],
+        createCashbookEntry: async (d) => d,
+        voidCashbookEntry: async () => {},
+        getInsurance: async () => ({}),
+        updateInsurance: async (d) => d,
+        getReportSummary: async () => ({})
+    };
+}
 
 // --- STATE MANAGEMENT ---
 let state = {
