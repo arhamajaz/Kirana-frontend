@@ -1699,3 +1699,334 @@ input:focus, select:focus, textarea:focus {
     border-left: 4px solid #ef4444;
     margin-bottom: 16px;
 }
+
+/* --- MOBILE-FIRST KHATA LEDGER STYLES --- */
+.ledger-header {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.ledger-header-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.ledger-header-top h2 {
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 700;
+}
+
+.ledger-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ledger-header-actions .date-picker-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-color);
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.ledger-header-actions label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.ledger-header-actions input[type="date"] {
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.85rem;
+    outline: none;
+    cursor: pointer;
+}
+
+/* Khata Transaction List */
+.transaction-list-container {
+    margin-bottom: 80px; /* Space for fixed bottom bar */
+}
+
+.khata-list-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.khata-card {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: background var(--transition-speed), transform 0.15s ease, border-color var(--transition-speed);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.khata-card:hover, .khata-card:active {
+    background: var(--surface-hover);
+    border-color: var(--border-focus);
+    transform: translateY(-1px);
+}
+
+.khata-card-left {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    padding-right: 12px;
+}
+
+.khata-card-date {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.khata-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.duration-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--primary-bg);
+    color: var(--primary-accent);
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.khata-card-remarks {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+}
+
+.khata-card-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.amt-debit {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--debit-accent);
+}
+
+.amt-credit {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--credit-accent);
+}
+
+.khata-card-type-tag {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+/* Mobile Fixed Bottom Action Bar */
+.khata-bottom-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--surface-color);
+    border-top: 1px solid var(--border-color);
+    padding: 12px 16px;
+    display: flex;
+    gap: 12px;
+    z-index: 100;
+    box-shadow: var(--nav-shadow);
+}
+
+.btn-khata {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-khata:active {
+    transform: scale(0.98);
+}
+
+.btn-khata-gave {
+    background: var(--debit-accent);
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
+}
+
+.btn-khata-got {
+    background: var(--credit-accent);
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+}
+
+/* Smart Modal Segmented Toggle Bar */
+.txn-type-toggle-bar {
+    display: flex;
+    background: var(--bg-color);
+    padding: 4px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    margin-bottom: 12px;
+    gap: 4px;
+}
+
+.txn-type-btn {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.txn-type-btn.btn-debit.active {
+    background: var(--debit-accent);
+    color: #ffffff;
+}
+
+.txn-type-btn.btn-credit.active {
+    background: var(--credit-accent);
+    color: #ffffff;
+}
+
+/* Advanced Interest Accordion */
+.advanced-options-accordion {
+    margin-top: 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--bg-color);
+}
+
+.advanced-options-summary {
+    padding: 12px 14px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface-color);
+}
+
+.advanced-options-content {
+    padding: 14px;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Transaction Details View */
+.detail-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.detail-metric-card {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.detail-metric-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.detail-metric-val {
+    font-size: 1.1rem;
+    font-weight: 800;
+}
+
+.detail-actions-bar {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+}
+
+/* Calculation Breakdown Card */
+.calc-breakdown-card {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 14px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.calc-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 10px;
+    margin-bottom: 12px;
+}
+
+.calc-math-box {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    font-family: monospace, sans-serif;
+    font-size: 0.88rem;
+    margin: 10px 0;
+}

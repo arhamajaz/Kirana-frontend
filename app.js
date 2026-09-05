@@ -76,11 +76,44 @@ const formatCurrency = (amount) => {
     const num = parseFloat(amount);
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(isNaN(num) ? 0 : num);
 };
+const cleanCurrency = (amount) => {
+    return formatCurrency(amount).replace(/₹/g, 'Rs. ');
+};
 const formatDate = (dateString) => {
     if (!dateString) return '-';
     const d = new Date(dateString);
     return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('en-IN');
 };
+
+function calculateDuration(startDateStr, endDateStr = null) {
+    if (!startDateStr) return '0D';
+    const start = new Date(startDateStr);
+    const end = endDateStr ? new Date(endDateStr) : new Date();
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) return '0D';
+
+    const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const e = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+
+    let years = e.getFullYear() - s.getFullYear();
+    let months = e.getMonth() - s.getMonth();
+    let days = e.getDate() - s.getDate();
+
+    if (days < 0) {
+        months -= 1;
+        const prevMonthLastDay = new Date(e.getFullYear(), e.getMonth(), 0).getDate();
+        days += prevMonthLastDay;
+    }
+    if (months < 0) {
+        years -= 1;
+        months += 12;
+    }
+
+    let parts = [];
+    if (years > 0) parts.push(`${years}Y`);
+    if (months > 0) parts.push(`${months}M`);
+    if (days > 0 || parts.length === 0) parts.push(`${days}D`);
+    return parts.join(' ');
+}
 
 // --- THEME ENGINE ---
 const themeToggleBtn = document.getElementById('theme-toggle');
@@ -408,14 +441,16 @@ function calculateLedger(customerId, asOfDateStr = null) {
 
     // Helper: Calculate interest accrued on a single Debit Silo between fromDate and toDate
     function calculateSiloInterest(silo, fromDate, toDate) {
-        if (!fromDate || !toDate || isNaN(fromDate.getTime()) || isNaN(toDate.getTime()) || fromDate >= toDate || silo.principalRemaining <= 0) {
+        const interestStart = silo.interestStartDate ? new Date(silo.interestStartDate) : new Date(silo.date);
+        const actualFromDate = new Date(Math.max(fromDate.getTime(), interestStart.getTime()));
+        if (!fromDate || !toDate || isNaN(fromDate.getTime()) || isNaN(toDate.getTime()) || actualFromDate >= toDate || silo.principalRemaining <= 0) {
             return 0;
         }
 
         let totalAccrued = 0;
         const phases = getTxnInterestPhases(silo, defaultLendingRate);
         let currentPrincipal = silo.principalRemaining;
-        const siloStart = new Date(silo.date);
+        const siloStart = interestStart;
 
         for (let i = 0; i < phases.length; i++) {
             const phase = phases[i];
@@ -538,6 +573,7 @@ function calculateLedger(customerId, asOfDateStr = null) {
             const newSilo = {
                 id: txn.id,
                 date: txnDate,
+                interestStartDate: txn.interestStartDate ? new Date(txn.interestStartDate) : txnDate,
                 lastInterestDate: txnDate,
                 originalPrincipal: amount,
                 principalRemaining: amount,
@@ -847,71 +883,58 @@ function renderLedger() {
     netEl.textContent = formatCurrency(netAmt) + (isCredit ? ' (Cr)' : (netAmt > 0 ? ' (Dr)' : ''));
     netEl.className = 'amount ' + (isCredit ? 'text-success' : (netAmt > 0 ? 'text-danger' : ''));
 
-    const tbody = document.getElementById('transaction-list-body');
-    tbody.innerHTML = '';
+    const listBody = document.getElementById('transaction-list-body');
+    if (!listBody) return;
+    listBody.innerHTML = '';
 
     const rows = ledger.rows || [];
     if (rows.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-secondary" style="padding: 2rem;">No transactions recorded for this customer.</td></tr>`;
+        listBody.innerHTML = `<div class="text-center text-secondary" style="padding: 2rem; background: var(--surface-color); border-radius: 12px; border: 1px solid var(--border-color);">No transactions recorded for this customer. Tap 'You Gave' or 'You Got' below to add an entry.</div>`;
         return;
     }
 
+    const asOfDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
+
     rows.forEach(row => {
-        const tr = document.createElement('tr');
-        if (row.isVoid) tr.classList.add('row-voided');
+        const isDebit = row.type === 'debit';
+        const isVoid = row.isVoid;
+        const isBadDebt = row.isBadDebt;
 
-        let debitAmt = '-', creditAmt = '-';
-        if (row.type === 'debit') debitAmt = formatCurrency(row.amount);
-        if (row.type === 'credit' || row.type === 'adjustment') creditAmt = formatCurrency(row.amount);
-        if (row.type === 'waiver') creditAmt = `(Waiver) ${formatCurrency(row.amount)}`;
+        const card = document.createElement('div');
+        card.className = 'khata-card' + (isVoid ? ' row-voided' : '');
+        card.onclick = () => openTransactionDetailModal(row.id);
 
-        const pClass = (row.runningPrincipal || 0) < 0 ? 'text-danger' : ((row.runningPrincipal || 0) > 0 ? 'text-success' : '');
+        const startDate = row.interestStartDate || row.date;
+        const durationStr = calculateDuration(startDate, asOfDate);
+
+        let amountHtml = '';
+        if (isVoid) {
+            amountHtml = `<span class="text-secondary" style="text-decoration: line-through;">${formatCurrency(row.amount)}</span> <span class="status-badge status-void">VOIDED</span>`;
+        } else if (isBadDebt) {
+            amountHtml = `<span class="amt-debit">${formatCurrency(row.amount)}</span> <span class="status-badge status-baddebt">WRITTEN OFF</span>`;
+        } else if (isDebit) {
+            amountHtml = `<span class="amt-debit">${formatCurrency(row.amount)}</span><span class="khata-card-type-tag">You Gave</span>`;
+        } else {
+            amountHtml = `<span class="amt-credit">${formatCurrency(row.amount)}</span><span class="khata-card-type-tag">${row.type === 'waiver' ? 'Waiver' : 'You Got'}</span>`;
+        }
+
         const categoryBadge = row.category ? `<span class="badge">${row.category}</span>` : '';
-        const voidBadge = row.isVoid ? `<span class="status-badge status-void">VOIDED</span> ` : '';
-        const editedBadge = row.isEdited ? `<span class="status-badge status-edited">EDITED</span> ` : '';
+        const durationBadge = isDebit && !isVoid ? `<span class="duration-pill"><i class="ph ph-clock"></i> ${durationStr}</span>` : '';
 
-        let subtitleHtml = '';
-        if (row.type === 'debit' && !row.isVoid) {
-            const phases = getTxnInterestPhases(row);
-            const badgeText = formatPhaseSummaryBadge(phases);
-            subtitleHtml = `<div class="interest-phase-tag"><i class="ph ph-percent"></i> ${badgeText}</div>`;
-        } else if (row.type === 'credit' && row.paymentTrace && !row.isVoid) {
-            subtitleHtml = `<div class="payment-trace-tag"><i class="ph ph-arrow-down-right"></i> ${row.paymentTrace}</div>`;
-        }
-
-        let interestCellHtml = row.isVoid ? '-' : formatCurrency(row.runningInterest || 0);
-        if (!row.isVoid && row.type === 'debit') {
-            interestCellHtml = `<span class="interest-breakdown-trigger" onclick="showInterestBreakdown('${row.id}')" title="View Calculation Breakdown">${interestCellHtml} <i class="ph ph-info"></i></span>`;
-        }
-
-        tr.innerHTML = `
-            <td>
-                <div>${formatDate(row.date)}</div>
-            </td>
-            <td>
-                ${editedBadge}${voidBadge}${categoryBadge} <strong>${row.remarks || ''}</strong>
-                ${row.voidReason ? `<br><small class="text-secondary">Reason: ${row.voidReason}</small>` : ''}
-                ${subtitleHtml}
-            </td>
-            <td class="text-right text-danger">${debitAmt}</td>
-            <td class="text-right text-success">${creditAmt}</td>
-            <td class="text-right ${pClass}">${row.isVoid ? '-' : formatCurrency(Math.abs(row.runningPrincipal || 0))}</td>
-            <td class="text-right">${interestCellHtml}</td>
-            <td class="text-right">
-                ${row.isVoid 
-                    ? `<span class="text-secondary" style="font-size: 0.8rem;">Reversed</span>`
-                    : (row.isBadDebt 
-                        ? `<span class="status-badge status-baddebt">WRITTEN OFF</span>`
-                        : `
-                            <button class="btn-icon" onclick="editTransaction('${row.id}')" title="Edit Transaction" style="margin-right: 4px;"><i class="ph ph-pencil-simple"></i></button>
-                            <button class="btn-icon text-danger" onclick="openVoidModal('txn', '${row.id}')" title="Void / Reverse Transaction" style="margin-right: 4px;"><i class="ph ph-prohibit"></i></button>
-                            ${row.type === 'debit' ? `<button class="btn-icon text-danger" onclick="openMarkBadDebtModal('${state.currentCustomerId}', '${row.id}')" title="Mark Txn as Bad Debt (डूबत)"><i class="ph ph-warning"></i></button>` : ''}
-                        `
-                    )
-                }
-            </td>
+        card.innerHTML = `
+            <div class="khata-card-left">
+                <div class="khata-card-date">${formatDate(row.date)}</div>
+                <div class="khata-card-meta">
+                    ${durationBadge}
+                    ${categoryBadge}
+                    <span class="khata-card-remarks">${row.remarks || 'No remarks'}</span>
+                </div>
+            </div>
+            <div class="khata-card-right">
+                ${amountHtml}
+            </div>
         `;
-        tbody.appendChild(tr);
+        listBody.appendChild(card);
     });
 }
 
@@ -972,6 +995,8 @@ document.getElementById('search-input').addEventListener('input', (e) => {
 document.getElementById('btn-new-customer').onclick = () => {
     document.getElementById('customer-form').reset();
     document.getElementById('cust-id').value = '';
+    const delBtn = document.getElementById('btn-delete-customer-modal');
+    if (delBtn) delBtn.style.display = 'none';
     toggleModal('customer-modal', true);
 };
 
@@ -982,11 +1007,34 @@ function editCustomer(id) {
         document.getElementById('cust-id').value = customer.id;
         document.getElementById('cust-name').value = customer.name;
         document.getElementById('cust-phone').value = customer.phoneNumber || '';
+        document.getElementById('cust-address').value = customer.address || '';
         document.getElementById('cust-lend-rate').value = customer.lendingRate || '';
         document.getElementById('cust-dep-rate').value = customer.depositRate || '';
+        const defTypeInput = document.getElementById('cust-default-interest-type');
+        if (defTypeInput) defTypeInput.value = customer.defaultInterestType || 'simple';
+
+        const delBtn = document.getElementById('btn-delete-customer-modal');
+        if (delBtn) delBtn.style.display = 'inline-block';
         toggleModal('customer-modal', true);
     }
 }
+
+document.getElementById('btn-delete-customer-modal')?.addEventListener('click', () => {
+    const custId = document.getElementById('cust-id').value;
+    if (!custId) return;
+
+    const customer = state.customers.find(c => c.id === custId);
+    const name = customer ? customer.name : 'this customer';
+
+    if (confirm(`Are you sure you want to delete ${name}? This will permanently remove all associated transactions and ledger records.`)) {
+        state.customers = (state.customers || []).filter(c => c.id !== custId);
+        state.transactions = (state.transactions || []).filter(t => t.customerId !== custId);
+        saveData();
+        toggleModal('customer-modal', false);
+        showDashboard();
+        renderDashboard();
+    }
+});
 
 document.getElementById('customer-form').onsubmit = async (e) => {
     e.preventDefault();
@@ -996,7 +1044,6 @@ document.getElementById('customer-form').onsubmit = async (e) => {
         const submitBtn = e.target.querySelector('button[type="submit"]');
         const originalBtnText = submitBtn.textContent;
 
-        // Reuse or create a single error element
         let errorEl = document.getElementById('customer-form-error');
         if (!errorEl) {
             errorEl = document.createElement('div');
@@ -1016,14 +1063,18 @@ document.getElementById('customer-form').onsubmit = async (e) => {
         try {
             const name = document.getElementById('cust-name').value.trim();
             const phoneNumber = document.getElementById('cust-phone').value.trim();
+            const address = document.getElementById('cust-address').value.trim();
             const lendingRate = parseFloat(document.getElementById('cust-lend-rate').value);
             const depositRate = parseFloat(document.getElementById('cust-dep-rate').value);
+            const defaultInterestType = document.getElementById('cust-default-interest-type').value;
 
             const customerData = {
                 name,
                 phoneNumber,
+                address,
                 lendingRate,
-                depositRate
+                depositRate,
+                defaultInterestType
             };
 
             const idx = state.customers.findIndex(c => c.id === id);
@@ -1040,7 +1091,6 @@ document.getElementById('customer-form').onsubmit = async (e) => {
                 }
             }
 
-            // Reset and close
             e.target.reset();
             toggleModal('customer-modal', false);
             renderDashboard();
@@ -1059,7 +1109,6 @@ document.getElementById('customer-form').onsubmit = async (e) => {
     const submitBtn = e.target.querySelector('button[type="submit"]');
     const originalBtnText = submitBtn.textContent;
 
-    // Reuse or create a single error element
     let errorEl = document.getElementById('customer-form-error');
     if (!errorEl) {
         errorEl = document.createElement('div');
@@ -1079,17 +1128,19 @@ document.getElementById('customer-form').onsubmit = async (e) => {
     try {
         const name = document.getElementById('cust-name').value.trim();
         const phoneNumber = document.getElementById('cust-phone').value.trim();
+        const address = document.getElementById('cust-address').value.trim();
         const lendingRate = parseFloat(document.getElementById('cust-lend-rate').value);
         const depositRate = parseFloat(document.getElementById('cust-dep-rate').value);
-        const compoundingFrequency = 'MONTHLY'; // Default compounding frequency for this phase
+        const defaultInterestType = document.getElementById('cust-default-interest-type').value;
 
         const customerData = {
             id: 'cust-' + Date.now(),
             name,
             phoneNumber,
+            address,
             lendingRate,
             depositRate,
-            compoundingFrequency,
+            defaultInterestType,
             createdAt: new Date().toISOString()
         };
 
@@ -1108,7 +1159,6 @@ document.getElementById('customer-form').onsubmit = async (e) => {
             }
         }
 
-        // Reset and close
         e.target.reset();
         toggleModal('customer-modal', false);
         renderDashboard();
@@ -1286,31 +1336,179 @@ function getTxnInterestPhases(txn, defaultRate = 12) {
 }
 
 // Transaction Form Modal Handlers
-document.getElementById('btn-add-transaction').onclick = () => {
-    document.getElementById('transaction-form').reset();
+function openAddTransactionModal(type = 'debit') {
+    const form = document.getElementById('transaction-form');
+    if (form) form.reset();
+
     document.getElementById('txn-id').value = '';
+    document.getElementById('txn-type').value = type;
+
+    const btnDebit = document.getElementById('toggle-type-debit');
+    const btnCredit = document.getElementById('toggle-type-credit');
+    if (btnDebit && btnCredit) {
+        if (type === 'debit') {
+            btnDebit.classList.add('active');
+            btnCredit.classList.remove('active');
+        } else {
+            btnCredit.classList.add('active');
+            btnDebit.classList.remove('active');
+        }
+    }
+
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('txn-date').value = today;
+    const startInput = document.getElementById('txn-interest-start-date');
+    if (startInput) startInput.value = today;
+
+    // Smart defaults from customer profile
+    if (state.currentCustomerId) {
+        const customer = state.customers.find(c => c.id === state.currentCustomerId);
+        if (customer) {
+            const rateInput = document.getElementById('txn-interest-rate');
+            if (rateInput) rateInput.value = customer.lendingRate || 12;
+
+            const typeInput = document.getElementById('txn-interest-type');
+            if (typeInput) typeInput.value = customer.defaultInterestType || 'simple';
+        }
+    }
+
+    // Collapse accordion by default
+    const accordion = document.getElementById('advanced-interest-accordion');
+    if (accordion) accordion.open = false;
+
     resetInterestScheduleBuilder();
     toggleModal('transaction-modal', true);
-};
+}
+
+document.getElementById('toggle-type-debit')?.addEventListener('click', () => {
+    document.getElementById('txn-type').value = 'debit';
+    document.getElementById('toggle-type-debit').classList.add('active');
+    document.getElementById('toggle-type-credit').classList.remove('active');
+});
+
+document.getElementById('toggle-type-credit')?.addEventListener('click', () => {
+    document.getElementById('txn-type').value = 'credit';
+    document.getElementById('toggle-type-credit').classList.add('active');
+    document.getElementById('toggle-type-debit').classList.remove('active');
+});
+
+document.getElementById('btn-ledger-gave')?.addEventListener('click', () => {
+    openAddTransactionModal('debit');
+});
+
+document.getElementById('btn-ledger-got')?.addEventListener('click', () => {
+    openAddTransactionModal('credit');
+});
+
+document.getElementById('btn-see-calculation')?.addEventListener('click', () => {
+    showInterestBreakdown(null);
+});
 
 function editTransaction(txnId) {
     const txn = state.transactions.find(t => t.id === txnId);
     if (txn) {
         document.getElementById('transaction-form').reset();
         document.getElementById('txn-id').value = txn.id;
-        document.getElementById('txn-date').value = new Date(txn.date).toISOString().split('T')[0];
+        const tDate = new Date(txn.date).toISOString().split('T')[0];
+        document.getElementById('txn-date').value = tDate;
         document.getElementById('txn-type').value = txn.type;
         document.getElementById('txn-category').value = txn.category;
         document.getElementById('txn-amount').value = txn.amount;
         document.getElementById('txn-remarks').value = txn.remarks || '';
         
+        const startInput = document.getElementById('txn-interest-start-date');
+        if (startInput) startInput.value = txn.interestStartDate ? new Date(txn.interestStartDate).toISOString().split('T')[0] : tDate;
+
+        const btnDebit = document.getElementById('toggle-type-debit');
+        const btnCredit = document.getElementById('toggle-type-credit');
+        if (btnDebit && btnCredit) {
+            if (txn.type === 'debit') {
+                btnDebit.classList.add('active');
+                btnCredit.classList.remove('active');
+            } else {
+                btnCredit.classList.add('active');
+                btnDebit.classList.remove('active');
+            }
+        }
+
         activeModalInterestPhases = JSON.parse(JSON.stringify(getTxnInterestPhases(txn, getCustomerDefaultInterestRate())));
         renderInterestSchedule();
         
         toggleModal('transaction-modal', true);
     }
+}
+
+function openTransactionDetailModal(txnId) {
+    const txn = (state.transactions || []).find(t => t.id === txnId);
+    if (!txn) return;
+
+    const customer = state.customers.find(c => c.id === txn.customerId);
+    const asOfDateInput = document.getElementById('ledger-as-of-date');
+    const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
+    const asOfDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
+
+    const ledger = calculateLedger(txn.customerId, asOfDateStr);
+    const row = (ledger.rows || []).find(r => r.id === txnId) || txn;
+    const silo = (ledger.silos || []).find(s => s.id === txnId);
+
+    const isDebit = txn.type === 'debit';
+    const startDate = txn.interestStartDate || txn.date;
+    const durationStr = calculateDuration(startDate, asOfDate);
+    const accruedInterest = isDebit ? (silo ? silo.accruedInterest : (row.runningInterest || 0)) : 0;
+    const principalAmt = parseFloat(txn.amount) || 0;
+    const effectiveAmt = isDebit ? (principalAmt + accruedInterest) : principalAmt;
+
+    const body = document.getElementById('txn-detail-body');
+    if (!body) return;
+
+    body.innerHTML = `
+        <div class="detail-metrics-grid">
+            <div class="detail-metric-card">
+                <span class="detail-metric-label">Principal Amount</span>
+                <span class="detail-metric-val ${isDebit ? 'text-danger' : 'text-success'}">${formatCurrency(principalAmt)}</span>
+            </div>
+            <div class="detail-metric-card">
+                <span class="detail-metric-label">Interest Duration</span>
+                <span class="detail-metric-val"><span class="duration-pill"><i class="ph ph-clock"></i> ${durationStr}</span></span>
+            </div>
+            <div class="detail-metric-card">
+                <span class="detail-metric-label">Interest on Principal</span>
+                <span class="detail-metric-val text-danger">${isDebit ? formatCurrency(accruedInterest) : '₹0.00'}</span>
+            </div>
+            <div class="detail-metric-card">
+                <span class="detail-metric-label">Effective Amount</span>
+                <span class="detail-metric-val ${isDebit ? 'text-danger' : 'text-success'}">${formatCurrency(effectiveAmt)}</span>
+            </div>
+        </div>
+
+        <div style="background: var(--bg-color); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); font-size: 0.88rem; display: flex; flex-direction: column; gap: 6px;">
+            <div><strong>Transaction Date:</strong> ${formatDate(txn.date)}</div>
+            ${txn.interestStartDate ? `<div><strong>Calculate Interest From:</strong> ${formatDate(txn.interestStartDate)}</div>` : ''}
+            <div><strong>Category:</strong> <span class="badge">${txn.category || 'Cash'}</span></div>
+            <div><strong>Remarks:</strong> ${txn.remarks || 'None'}</div>
+            ${isDebit ? `<div><strong>Interest Rate / Rule:</strong> ${(txn.interestRate !== undefined ? txn.interestRate : (customer?.lendingRate || 12))}% / yr (${(txn.interestType || 'simple').toUpperCase()})</div>` : ''}
+            ${txn.isVoid ? `<div class="text-danger"><strong>Status:</strong> VOIDED (Reason: ${txn.voidReason || 'Reversed'})</div>` : ''}
+            ${txn.isBadDebt ? `<div class="text-danger"><strong>Status:</strong> WRITTEN OFF TO BAD DEBT</div>` : ''}
+        </div>
+
+        <div class="detail-actions-bar">
+            ${!txn.isVoid && !txn.isBadDebt ? `
+                <button type="button" class="btn-outline btn-sm" onclick="toggleModal('txn-detail-modal', false); editTransaction('${txn.id}')">
+                    <i class="ph ph-pencil-simple"></i> Edit Entry
+                </button>
+                <button type="button" class="btn-outline btn-sm text-danger" onclick="toggleModal('txn-detail-modal', false); openVoidModal('txn', '${txn.id}')">
+                    <i class="ph ph-prohibit"></i> Delete / Void
+                </button>
+                ${isDebit ? `
+                    <button type="button" class="btn-outline btn-sm text-danger" onclick="toggleModal('txn-detail-modal', false); openMarkBadDebtModal('${txn.customerId}', '${txn.id}')">
+                        <i class="ph ph-warning"></i> Mark Bad Debt
+                    </button>
+                ` : ''}
+            ` : `<span class="text-secondary" style="font-size: 0.85rem;">Record is archived / non-editable.</span>`}
+        </div>
+    `;
+
+    toggleModal('txn-detail-modal', true);
 }
 
 document.getElementById('transaction-form').onsubmit = async (e) => {
@@ -1344,6 +1542,7 @@ document.getElementById('transaction-form').onsubmit = async (e) => {
 
         const amount = parseFloat(document.getElementById('txn-amount').value);
         const dateInput = document.getElementById('txn-date').value;
+        const interestStartDateInput = document.getElementById('txn-interest-start-date')?.value;
         const category = document.getElementById('txn-category').value;
         const remarks = document.getElementById('txn-remarks').value.trim();
 
@@ -1390,6 +1589,7 @@ document.getElementById('transaction-form').onsubmit = async (e) => {
         });
 
         const date = new Date(dateInput).toISOString();
+        const interestStartDate = interestStartDateInput ? new Date(interestStartDateInput).toISOString() : date;
         const txnIdVal = document.getElementById('txn-id').value;
         const isEdit = !!txnIdVal;
         const newTxnId = isEdit ? txnIdVal : `txn_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -1401,6 +1601,7 @@ document.getElementById('transaction-form').onsubmit = async (e) => {
             category,
             amount,
             date,
+            interestStartDate,
             interestPhases: phases,
             remarks: remarks || null,
             isVoid: false,
@@ -1415,19 +1616,18 @@ document.getElementById('transaction-form').onsubmit = async (e) => {
                 state.transactions[index] = { ...state.transactions[index], ...transactionData };
             }
         } else {
-            // Persist to local state & localStorage
             state.transactions.push(transactionData);
         }
         
         saveData();
 
-        // Attempt API sync if backend connected
         try {
             if (isEdit) {
                 await LedgerAPI.updateTransaction(newTxnId, {
                     type: typeValue.toUpperCase(),
                     amount,
                     date,
+                    interestStartDate,
                     interestPhases: phases,
                     remarks: remarks || null
                 });
@@ -1437,6 +1637,7 @@ document.getElementById('transaction-form').onsubmit = async (e) => {
                     type: typeValue.toUpperCase(),
                     amount,
                     date,
+                    interestStartDate,
                     interestPhases: phases,
                     remarks: remarks || null
                 });
@@ -1492,19 +1693,22 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
 
     const ledger = calculateLedger(targetCustId);
 
-    doc.setFontSize(20);
-    doc.text("Malwa Grain Merchants", 14, 20);
-    doc.setFontSize(12);
-    doc.text(`Statement of Account (${mode === 'detailed' ? 'Detailed Itemized Statement' : 'Summary Statement'})`, 14, 28);
+    doc.setFontSize(18);
+    doc.text("STATEMENT OF ACCOUNT", 14, 20);
+    doc.setFontSize(11);
+    doc.text(`(${mode === 'detailed' ? 'Detailed Itemized Statement' : 'Summary Statement'})`, 14, 28);
     
     doc.setFontSize(10);
     doc.text(`Customer Name: ${customer.name}`, 14, 40);
     doc.text(`Phone: ${customer.phoneNumber || 'N/A'}`, 14, 45);
-    doc.text(`Generated On: ${formatDate(new Date())}`, 14, 50);
+    if (customer.address) doc.text(`Address: ${customer.address}`, 14, 50);
+    doc.text(`Generated On: ${formatDate(new Date())}`, 14, customer.address ? 55 : 50);
 
-    doc.text(`Net Balance: ${formatCurrency(Math.abs(ledger.netOutstanding))} ${ledger.netOutstanding > 0 ? '(Dr - Customer Owes)' : '(Cr - Store Owes)'}`, 120, 40);
-    doc.text(`Principal Remaining: ${formatCurrency(Math.abs(ledger.totalPrincipalRemaining))}`, 120, 45);
-    doc.text(`Total Accrued Interest: ${formatCurrency(ledger.totalAccruedInterest)}`, 120, 50);
+    const startYHeader = customer.address ? 55 : 50;
+
+    doc.text(`Net Balance: ${cleanCurrency(Math.abs(ledger.netOutstanding))} ${ledger.netOutstanding > 0 ? '(Dr - Customer Owes)' : '(Cr - Store Owes)'}`, 120, 40);
+    doc.text(`Principal Remaining: ${cleanCurrency(Math.abs(ledger.totalPrincipalRemaining))}`, 120, 45);
+    doc.text(`Total Accrued Interest: ${cleanCurrency(ledger.totalAccruedInterest)}`, 120, 50);
 
     let tableHead = [];
     let tableBody = [];
@@ -1521,25 +1725,23 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
                 remarks += ` [Applied: ${row.paymentTrace}]`;
             }
 
-            const debitStr = row.type === 'debit' ? formatCurrency(row.amount) : '-';
+            const debitStr = row.type === 'debit' ? cleanCurrency(row.amount) : '-';
             const creditStr = (row.type === 'credit' || row.type === 'adjustment') 
-                ? formatCurrency(row.amount) 
-                : (row.type === 'waiver' ? `(Waiver) ${formatCurrency(row.amount)}` : '-');
-            const netBalStr = formatCurrency(Math.abs(row.totalNet || row.runningPrincipal || 0));
+                ? cleanCurrency(row.amount) 
+                : (row.type === 'waiver' ? `(Waiver) ${cleanCurrency(row.amount)}` : '-');
+            const netBalStr = cleanCurrency(Math.abs(row.totalNet || row.runningPrincipal || 0));
 
             return [dateStr, remarks, debitStr, creditStr, netBalStr];
         });
 
-        // Single "Total Accrued Interest" line item at the bottom
         tableBody.push([
             '', 
             'TOTAL ACCRUED INTEREST', 
             '', 
             '', 
-            formatCurrency(ledger.totalAccruedInterest)
+            cleanCurrency(ledger.totalAccruedInterest)
         ]);
     } else {
-        // Detailed Itemized Statement
         tableHead = [['Date', 'Remarks & Notes', 'Principal', 'Active Interest Rule', 'Elapsed Days', 'Accrued Interest']];
         const now = new Date();
 
@@ -1550,10 +1752,10 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
             let principalStr = '-';
             let interestRuleStr = 'N/A';
             let elapsedDaysStr = 'N/A';
-            let accruedInterestStr = '₹0.00';
+            let accruedInterestStr = 'Rs. 0.00';
 
             if (row.type === 'debit') {
-                principalStr = formatCurrency(row.amount);
+                principalStr = cleanCurrency(row.amount);
                 const iType = (row.interestType || customer.defaultInterestType || 'SIMPLE').toUpperCase();
                 const iRate = row.interestRate !== undefined ? row.interestRate : (customer.lendingRate || 12);
                 let freqStr = '';
@@ -1571,14 +1773,14 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
                 elapsedDaysStr = `${elapsedDays} days`;
 
                 const accrued = silo ? silo.accruedInterest : (row.runningInterest || 0);
-                accruedInterestStr = formatCurrency(accrued);
+                accruedInterestStr = cleanCurrency(accrued);
             } else if (row.type === 'credit') {
-                principalStr = `-${formatCurrency(row.amount)}`;
+                principalStr = `-${cleanCurrency(row.amount)}`;
                 if (row.paymentTrace) remarks += ` [Applied: ${row.paymentTrace}]`;
             } else if (row.type === 'waiver') {
-                principalStr = `(Waiver) -${formatCurrency(row.amount)}`;
+                principalStr = `(Waiver) -${cleanCurrency(row.amount)}`;
             } else if (row.type === 'adjustment') {
-                principalStr = `(Adj) -${formatCurrency(row.amount)}`;
+                principalStr = `(Adj) -${cleanCurrency(row.amount)}`;
             }
 
             return [dateStr, remarks, principalStr, interestRuleStr, elapsedDaysStr, accruedInterestStr];
@@ -1586,7 +1788,7 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
     }
 
     doc.autoTable({
-        startY: 60,
+        startY: startYHeader + 10,
         head: tableHead,
         body: tableBody,
         theme: 'striped',
@@ -1611,12 +1813,10 @@ function downloadCustomerListPDF() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
 
-    doc.setFontSize(20);
-    doc.text("Malwa Grain Merchants", 14, 20);
-    doc.setFontSize(12);
-    doc.text("Customer Outstanding Summary Report", 14, 28);
+    doc.setFontSize(18);
+    doc.text("CUSTOMER OUTSTANDING SUMMARY REPORT", 14, 20);
     doc.setFontSize(10);
-    doc.text(`Generated On: ${formatDate(new Date())}`, 14, 36);
+    doc.text(`Generated On: ${formatDate(new Date())}`, 14, 28);
 
     let grandPrincipal = 0;
     let grandInterest = 0;
@@ -1631,9 +1831,9 @@ function downloadCustomerListPDF() {
         return [
             customer.name,
             customer.phoneNumber || 'N/A',
-            formatCurrency(ledger.totalPrincipalRemaining),
-            formatCurrency(ledger.totalAccruedInterest),
-            formatCurrency(Math.abs(ledger.netOutstanding)) + (ledger.netOutstanding > 0 ? ' (Dr)' : (ledger.netOutstanding < 0 ? ' (Cr)' : '')),
+            cleanCurrency(ledger.totalPrincipalRemaining),
+            cleanCurrency(ledger.totalAccruedInterest),
+            cleanCurrency(Math.abs(ledger.netOutstanding)) + (ledger.netOutstanding > 0 ? ' (Dr)' : (ledger.netOutstanding < 0 ? ' (Cr)' : '')),
             ledger.status.toUpperCase()
         ];
     });
@@ -1641,14 +1841,14 @@ function downloadCustomerListPDF() {
     tableBody.push([
         'TOTALS',
         '-',
-        formatCurrency(grandPrincipal),
-        formatCurrency(grandInterest),
-        formatCurrency(Math.abs(grandNet)) + (grandNet > 0 ? ' (Dr)' : ' (Cr)'),
+        cleanCurrency(grandPrincipal),
+        cleanCurrency(grandInterest),
+        cleanCurrency(Math.abs(grandNet)) + (grandNet > 0 ? ' (Dr)' : ' (Cr)'),
         '-'
     ]);
 
     doc.autoTable({
-        startY: 42,
+        startY: 36,
         head: [['Customer Name', 'Phone', 'Principal Remaining', 'Accrued Interest', 'Net Outstanding', 'Status']],
         body: tableBody,
         theme: 'grid',
@@ -1681,99 +1881,28 @@ if (btnPdfSummarized) {
     };
 }
 
-// Database Excel / JSON Backup Logic
-function exportLedgerToExcel() {
-    if (!window.XLSX) {
-        console.warn("Excel export library unavailable. Falling back to JSON backup.");
-        downloadJsonBackup();
-        return;
-    }
-    try {
-        const wb = XLSX.utils.book_new();
-
-        // 1. Customers Sheet
-        const custData = (state.customers || []).map(c => {
-            const ledger = calculateLedger(c.id);
-            return {
-                "Customer ID": c.id,
-                "Customer Name": c.name,
-                "Phone Number": c.phoneNumber || "N/A",
-                "Lending Rate (%)": c.lendingRate || 12,
-                "Deposit Rate (%)": c.depositRate || 6,
-                "Principal Remaining (₹)": ledger.totalPrincipalRemaining,
-                "Accrued Interest (₹)": ledger.totalAccruedInterest,
-                "Net Balance (₹)": ledger.netOutstanding,
-                "Status": (ledger.status || "ACTIVE").toUpperCase()
-            };
-        });
-        const wsCustomers = XLSX.utils.json_to_sheet(custData);
-        XLSX.utils.book_append_sheet(wb, wsCustomers, "Customers Summary");
-
-        // 2. Transactions Sheet
-        const txnData = (state.transactions || []).map(t => {
-            const cust = state.customers.find(c => c.id === t.customerId);
-            return {
-                "Transaction ID": t.id,
-                "Customer Name": cust ? cust.name : "Unknown",
-                "Date": t.date ? formatDate(t.date) : "",
-                "Type": (t.type || "").toUpperCase(),
-                "Category": t.category || "Cash",
-                "Amount (₹)": t.amount || 0,
-                "Remarks": t.remarks || "",
-                "Interest Type": t.interestType || "SIMPLE",
-                "Interest Rate (%)": t.interestRate !== undefined ? t.interestRate : (cust ? cust.lendingRate : 12),
-                "Voided": t.isVoid ? "YES" : "NO"
-            };
-        });
-        const wsTxns = XLSX.utils.json_to_sheet(txnData);
-        XLSX.utils.book_append_sheet(wb, wsTxns, "Transactions History");
-
-        // 3. Inventory Stock Sheet (if items exist)
-        if (Array.isArray(state.items) && state.items.length > 0) {
-            const itemData = state.items.map(i => ({
-                "Item Name": i.name,
-                "Stock Quantity": i.qty || 0,
-                "Min Reorder Qty": i.minReorderQty || 5,
-                "Buy Price (₹)": i.buyPrice || 0,
-                "Sell Price (₹)": i.sellPrice || 0
-            }));
-            const wsItems = XLSX.utils.json_to_sheet(itemData);
-            XLSX.utils.book_append_sheet(wb, wsItems, "Inventory Stock");
-        }
-
-        // 4. Bills Sheet (if bills exist)
-        if (Array.isArray(state.bills) && state.bills.length > 0) {
-            const billData = state.bills.map(b => ({
-                "Bill ID": b.id,
-                "Customer Name": b.customerName || "Walk-in Customer",
-                "Date": b.date ? formatDate(b.date) : "",
-                "Total Amount (₹)": b.totalAmount || 0,
-                "Payment Mode": b.paymentMode || "CASH",
-                "Paid Amount (₹)": b.paidAmount || 0,
-                "Remaining Balance (₹)": b.remainingBalance || 0,
-                "Voided": b.isVoid ? "YES" : "NO"
-            }));
-            const wsBills = XLSX.utils.json_to_sheet(billData);
-            XLSX.utils.book_append_sheet(wb, wsBills, "Bills & Invoices");
-        }
-
-        const dateStr = new Date().toISOString().split('T')[0];
-        XLSX.writeFile(wb, `Kirana_Ledger_Backup_${dateStr}.xlsx`);
-    } catch (err) {
-        console.error("Excel Export Error:", err);
-        downloadJsonBackup();
-    }
-}
-
+// Database JSON Backup Logic
 function downloadJsonBackup() {
-    const dataStr = JSON.stringify(state, null, 2);
+    const fullBackup = {
+        appName: "Kirana Ledger Pro",
+        exportedAt: new Date().toISOString(),
+        version: "2.0.0",
+        customers: state.customers || [],
+        transactions: state.transactions || [],
+        badDebts: state.badDebts || [],
+        cashbook: state.cashbook || [],
+        items: state.items || [],
+        bills: state.bills || [],
+        insurance: state.insurance || {}
+    };
+    const dataStr = JSON.stringify(fullBackup, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     
     const a = document.createElement('a');
     a.href = url;
     const dateStr = new Date().toISOString().split('T')[0];
-    a.download = `Kirana_Ledger_Backup_${dateStr}.json`;
+    a.download = `Kirana_Ledger_Complete_Backup_${dateStr}.json`;
     document.body.appendChild(a);
     a.click();
     
@@ -1786,7 +1915,7 @@ function downloadJsonBackup() {
 const btnBackupDb = document.getElementById('btn-backup-db');
 if (btnBackupDb) {
     btnBackupDb.onclick = () => {
-        exportLedgerToExcel();
+        downloadJsonBackup();
     };
 }
 
@@ -3064,113 +3193,93 @@ function runStandaloneCalculation() {
 }
 
 // --- AUDIT & TRANSPARENCY FEATURES ---
-function showInterestBreakdown(txnId) {
-    const txn = state.transactions.find(t => t.id === txnId);
-    if (!txn) return;
-    
-    const customer = state.customers.find(c => c.id === txn.customerId);
+function showInterestBreakdown(txnId = null) {
+    const targetCustId = state.currentCustomerId;
+    if (!targetCustId) return;
+
+    const customer = state.customers.find(c => c.id === targetCustId);
     const defaultLendingRate = customer?.lendingRate !== undefined ? parseFloat(customer.lendingRate) : 12;
-    
+
     const asOfDateInput = document.getElementById('ledger-as-of-date');
     const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
     const toDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
     toDate.setHours(23, 59, 59, 999);
 
-    const ledger = calculateLedger(txn.customerId, asOfDateStr);
-    const silo = (ledger.silos || []).find(s => s.id === txn.id);
+    const ledger = calculateLedger(targetCustId, asOfDateStr);
+    const container = document.getElementById('interest-breakdown-body');
+    if (!container) return;
 
-    const phases = getTxnInterestPhases(txn, defaultLendingRate);
-    let currentPrincipal = txn.amount;
-    const siloStart = new Date(txn.date);
-    
-    let html = '';
-    let totalAccrued = 0;
+    const debits = (ledger.rows || []).filter(r => r.type === 'debit' && !r.isVoid && !r.isBadDebt && (!txnId || r.id === txnId));
 
-    // Display Advance Credit Balance Banners if advance periods occurred
-    const advanceEntries = (ledger.advanceLog || []).filter(a => a.siloId === txn.id || a.customerId === txn.customerId);
-    if (advanceEntries.length > 0) {
-        advanceEntries.forEach(adv => {
-            html += `
-            <div class="breakdown-step advance-step" style="border-left: 4px solid #f59e0b; background: rgba(245, 158, 11, 0.08); padding: 12px; border-radius: 6px; margin-bottom: 12px;">
-                <h4 style="margin: 0 0 4px 0; color: #d97706;"><i class="ph ph-pause-circle"></i> Interest Paused (Advance Credit Balance 0%)</h4>
-                <p style="margin: 2px 0;"><strong>Period:</strong> ${formatDate(adv.fromDate)} to ${formatDate(adv.toDate)} (${adv.days} days)</p>
-                <p style="margin: 2px 0;"><strong>Running Advance Balance:</strong> ${formatCurrency(adv.advanceAmount)} (Cr)</p>
-                <div class="formula" style="margin-top: 6px; font-weight: 600; color: var(--text-primary);">
-                    ${formatDate(adv.fromDate)} to ${formatDate(adv.toDate)}: ${formatCurrency(adv.advanceAmount)} (Advance) × 0% = <strong>₹0.00</strong>
-                </div>
-            </div>`;
-        });
+    if (debits.length === 0) {
+        container.innerHTML = '<p class="text-secondary text-center" style="padding: 2rem;">No active debit transactions to calculate interest.</p>';
+        toggleModal('interest-breakdown-modal', true);
+        return;
     }
 
-    for (let i = 0; i < phases.length; i++) {
-        const phase = phases[i];
+    let html = '';
+    let totalLedgerInterest = 0;
+
+    debits.forEach((txn, index) => {
+        const silo = (ledger.silos || []).find(s => s.id === txn.id);
+        const startDate = txn.interestStartDate ? new Date(txn.interestStartDate) : new Date(txn.date);
         
-        let phaseStart = siloStart;
-        if (i > 0 && phases[i - 1].endDate) {
-            phaseStart = new Date(phases[i - 1].endDate);
+        const diffTime = Math.max(0, toDate.getTime() - startDate.getTime());
+        const totalDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        const durationText = calculateDuration(startDate, toDate);
+
+        const principalAmt = parseFloat(txn.amount) || 0;
+        const rate = txn.interestRate !== undefined ? parseFloat(txn.interestRate) : defaultLendingRate;
+        const interestType = (txn.interestType || customer?.defaultInterestType || 'simple').toLowerCase();
+
+        const accruedInterest = silo ? silo.accruedInterest : 0;
+        totalLedgerInterest += accruedInterest;
+
+        let formulaStr = '';
+        if (interestType === 'simple') {
+            formulaStr = `${formatCurrency(principalAmt)} × ${rate}% × (${totalDays} / 365 days)`;
+        } else {
+            formulaStr = `${formatCurrency(principalAmt)} × [ (1 + ${rate}% / 12) ^ (${totalDays} / 30.41) - 1 ]`;
         }
-        
-        let phaseEnd = new Date(8640000000000000);
-        if (phase.endDate) {
-            phaseEnd = new Date(phase.endDate);
-        }
-        
-        const windowStart = new Date(Math.max(siloStart.getTime(), phaseStart.getTime()));
-        const windowEnd = new Date(Math.min(toDate.getTime(), phaseEnd.getTime()));
-        
-        const days = (windowEnd - windowStart) / (1000 * 60 * 60 * 24);
-        if (days <= 0) continue;
-        
-        const rateFrac = (parseFloat(phase.rate) || 0) / 100;
-        let phaseInterest = 0;
-        let formulaText = '';
-        
-        if (phase.type === 'simple' && rateFrac > 0) {
-            phaseInterest = currentPrincipal * rateFrac * (days / 365);
-            formulaText = `₹${formatCurrency(currentPrincipal)} × ${phase.rate}% / 365 × ${Math.round(days)} days`;
-        } else if (phase.type === 'compound' && rateFrac > 0) {
-            let freqNum = 1;
-            let periodDays = 365;
-            
-            switch (phase.frequency) {
-                case 'monthly': freqNum = 12; periodDays = 365 / 12; break;
-                case 'quarterly': freqNum = 4; periodDays = 365 / 4; break;
-                case 'half-yearly': freqNum = 2; periodDays = 365 / 2; break;
-                case 'custom_days':
-                    periodDays = Math.max(1, parseInt(phase.customDays, 10) || 30);
-                    freqNum = 365 / periodDays;
-                    break;
-                case 'yearly':
-                default:
-                    freqNum = 1; periodDays = 365; break;
-            }
-            
-            const multiplier = Math.pow(1 + rateFrac / freqNum, days / periodDays);
-            phaseInterest = currentPrincipal * (multiplier - 1);
-            formulaText = `₹${formatCurrency(currentPrincipal)} × [ (1 + ${phase.rate}% / ${freqNum}) ^ (${Math.round(days)} / ${Math.round(periodDays)}) - 1 ]`;
-        }
-        
-        totalAccrued += phaseInterest;
 
         html += `
-        <div class="breakdown-step">
-            <h4>Phase ${i + 1}: ${phase.type === 'none' ? 'Grace Period (0%)' : (phase.type.charAt(0).toUpperCase() + phase.type.slice(1))}</h4>
-            <p><strong>Period:</strong> ${formatDate(windowStart.toISOString())} to ${formatDate(windowEnd.toISOString())} (${Math.round(days)} days)</p>
-            <p><strong>Principal:</strong> ₹${formatCurrency(currentPrincipal)}</p>
-            ${phase.type !== 'none' ? `<div class="formula">${formulaText} = <strong>₹${formatCurrency(phaseInterest)}</strong></div>` : ''}
-        </div>`;
-        
-        const nextPhase = phases[i + 1];
-        if (phase.type === 'simple' && nextPhase && nextPhase.type === 'compound') {
-            currentPrincipal += phaseInterest;
-        }
-    }
+            <div class="calc-breakdown-card">
+                <div class="calc-card-header">
+                    <div>
+                        <strong style="font-size: 1rem; color: var(--text-primary);">Item #${index + 1}: ${txn.remarks || 'Debit Entry'}</strong>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
+                            Category: ${txn.category || 'Cash'} | Txn Date: ${formatDate(txn.date)}
+                        </div>
+                    </div>
+                    <span class="amt-debit">${formatCurrency(principalAmt)}</span>
+                </div>
+                <div style="font-size: 0.88rem; line-height: 1.5; color: var(--text-primary);">
+                    <div><strong>Time Period:</strong> ${formatDate(startDate)} → ${formatDate(toDate)}</div>
+                    <div><strong>Duration:</strong> <span class="duration-pill"><i class="ph ph-clock"></i> ${durationText} (${totalDays} Days)</span></div>
+                    <div class="calc-math-box">
+                        <div style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 4px;">Formula: Principal × Rate × Time</div>
+                        <div>${formulaStr}</div>
+                        <div style="margin-top: 6px; font-weight: 700; color: var(--debit-accent);">
+                            = Accrued Interest: ${formatCurrency(accruedInterest)}
+                        </div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-weight: 700; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color);">
+                        <span>Effective Total (Principal + Interest):</span>
+                        <span class="text-danger">${formatCurrency(principalAmt + accruedInterest)}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
 
-    const actualAccrued = silo ? silo.accruedInterest : totalAccrued;
-    
-    html += `<div style="text-align: right; padding: 12px 12px 0 0; font-size: 1.1rem;"><strong>Actual Net Accrued: ₹${formatCurrency(actualAccrued)}</strong></div>`;
-    
-    document.getElementById('interest-breakdown-body').innerHTML = html || '<p>No interest accrued yet.</p>';
+    html += `
+        <div style="background: var(--surface-color); padding: 14px; border-radius: 10px; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
+            <span style="font-weight: 700; color: var(--text-primary);">Total Accrued Ledger Interest:</span>
+            <span class="amount text-danger" style="font-size: 1.2rem; font-weight: 800;">${formatCurrency(totalLedgerInterest)}</span>
+        </div>
+    `;
+
+    container.innerHTML = html;
     toggleModal('interest-breakdown-modal', true);
 }
 

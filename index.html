@@ -558,20 +558,25 @@
 
             <section id="ledger-view" class="view hidden">
                 <div class="ledger-header">
-                    <button id="btn-back" class="btn-secondary">
-                        <i class="ph ph-arrow-left"></i> Back
-                    </button>
-                    <h2 id="ledger-customer-name">Customer Name</h2>
+                    <div class="ledger-header-top">
+                        <button id="btn-back" class="btn-secondary">
+                            <i class="ph ph-arrow-left"></i> Back
+                        </button>
+                        <h2 id="ledger-customer-name">Customer Name</h2>
+                    </div>
                     <div class="ledger-header-actions">
-                        <div class="date-picker-group" style="display: flex; align-items: center; gap: 8px; background: var(--surface-color); padding: 4px 12px; border-radius: 8px; border: 1px solid var(--border-color);">
-                            <label for="ledger-as-of-date" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 600; white-space: nowrap;">Date of Settlement:</label>
-                            <input type="date" id="ledger-as-of-date" style="border: none; background: transparent; color: var(--text-primary); font-family: inherit; font-size: 0.9rem; outline: none; cursor: pointer;">
+                        <div class="date-picker-group">
+                            <label for="ledger-as-of-date">Settle Date:</label>
+                            <input type="date" id="ledger-as-of-date">
                         </div>
+                        <button id="btn-see-calculation" class="btn-outline">
+                            <i class="ph ph-calculator"></i> See Calculation
+                        </button>
                         <button id="btn-whatsapp" class="btn-whatsapp">
                             <i class="ph ph-whatsapp-logo"></i> Reminder
                         </button>
                         <button id="btn-download-pdf" class="btn-outline">
-                            <i class="ph ph-download-simple"></i> Statement
+                            <i class="ph ph-download-simple"></i> Print/PDF
                         </button>
                     </div>
                 </div>
@@ -591,27 +596,20 @@
                     </div>
                 </div>
 
-                <div class="ledger-actions">
-                    <button id="btn-add-transaction" class="btn-primary">
-                        <i class="ph ph-receipt"></i> Add Transaction
-                    </button>
+                <div id="transaction-list-container" class="transaction-list-container">
+                    <div id="transaction-list-body" class="khata-list-body">
+                        <!-- Mobile-first transaction list rendered dynamically -->
+                    </div>
                 </div>
 
-                <div class="transaction-list-container">
-                    <table id="transaction-table" class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Date</th>
-                                <th>Remarks</th>
-                                <th class="text-right">Debit (-)</th>
-                                <th class="text-right">Credit (+)</th>
-                                <th class="text-right">Running Principal</th>
-                                <th class="text-right">Accrued Interest</th>
-                            </tr>
-                        </thead>
-                        <tbody id="transaction-list-body">
-                            </tbody>
-                    </table>
+                <!-- Mobile-First Fixed Bottom Action Bar -->
+                <div class="khata-bottom-bar">
+                    <button type="button" id="btn-ledger-gave" class="btn-khata btn-khata-gave">
+                        <i class="ph ph-arrow-up-right"></i> You Gave (Red)
+                    </button>
+                    <button type="button" id="btn-ledger-got" class="btn-khata btn-khata-got">
+                        <i class="ph ph-arrow-down-left"></i> You Got (Green)
+                    </button>
                 </div>
             </section>
             <section id="reports-view" class="view hidden tab-content">
@@ -905,87 +903,163 @@
     <div id="customer-modal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Customer Settings</h3>
+                <h3>Customer Profile & Settings</h3>
                 <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
             </div>
             <form id="customer-form">
                 <input type="hidden" id="cust-id">
                 <div class="form-group">
-                    <label>Name</label>
-                    <input type="text" id="cust-name" required>
+                    <label>Full Name</label>
+                    <input type="text" id="cust-name" placeholder="e.g. Ramesh Patel" required>
                 </div>
-                <div class="form-group">
-                    <label>Phone</label>
-                    <input type="tel" id="cust-phone" required>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label>Phone Number (Optional)</label>
+                        <input type="tel" id="cust-phone" placeholder="e.g. 9876543210">
+                    </div>
+                    <div class="form-group">
+                        <label>Address (Optional)</label>
+                        <input type="text" id="cust-address" placeholder="e.g. Main Market, Shop #4">
+                    </div>
                 </div>
                 <div class="form-group-row">
                     <div class="form-group">
                         <label>Lending Interest (%) / yr</label>
-                        <input type="number" id="cust-lend-rate" step="0.1" required>
+                        <input type="number" id="cust-lend-rate" step="0.1" placeholder="12" required>
                     </div>
                     <div class="form-group">
                         <label>Deposit Interest (%) / yr</label>
-                        <input type="number" id="cust-dep-rate" step="0.1" required>
+                        <input type="number" id="cust-dep-rate" step="0.1" placeholder="6" required>
                     </div>
                 </div>
-                <button type="submit" class="btn-primary full-width">Save Customer</button>
+                <div class="form-group">
+                    <label>Default Interest Calculation Method</label>
+                    <select id="cust-default-interest-type">
+                        <option value="simple" selected>Simple Interest (No compounding)</option>
+                        <option value="compound">Compound Interest (Monthly)</option>
+                    </select>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 16px;">
+                    <button type="submit" class="btn-primary" style="flex: 1;">Save Customer</button>
+                    <button type="button" id="btn-delete-customer-modal" class="btn-danger" style="display: none; flex: 0 0 auto; background: var(--debit-accent); color: white;">
+                        <i class="ph ph-trash"></i> Delete Customer
+                    </button>
+                </div>
             </form>
         </div>
     </div>
 
+    <!-- Smart Add / Edit Transaction Modal -->
     <div id="transaction-modal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Log Entry</h3>
+                <h3 id="txn-modal-title">Add Transaction</h3>
                 <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
             </div>
             <form id="transaction-form">
                 <input type="hidden" id="txn-id">
-                <div class="form-group">
-                    <label>Date</label>
-                    <input type="date" id="txn-date" required>
-                </div>
-                <div class="form-group schedule-builder-section">
-                    <div class="schedule-builder-header">
-                        <label class="schedule-builder-label"><i class="ph ph-percent"></i> Interest Schedule Builder</label>
-                    </div>
-                    <div id="interest-schedule-container" class="interest-schedule-container">
-                        <!-- Dynamic Phase Cards Rendered via JS -->
-                    </div>
-                    <button type="button" id="btn-add-phase" class="btn-add-phase-btn">
-                        <i class="ph ph-plus-circle"></i> + Add Next Phase
+                
+                <!-- Color-Coded Top Toggle -->
+                <div class="txn-type-toggle-bar">
+                    <button type="button" id="toggle-type-debit" class="txn-type-btn btn-debit active">
+                        <i class="ph ph-arrow-up-right"></i> You Gave (Red)
+                    </button>
+                    <button type="button" id="toggle-type-credit" class="txn-type-btn btn-credit">
+                        <i class="ph ph-arrow-down-left"></i> You Got (Green)
                     </button>
                 </div>
-                <div class="form-group-row">
+                <input type="hidden" id="txn-type" value="debit">
+
+                <div class="form-group-row" style="margin-top: 12px;">
                     <div class="form-group">
-                        <label>Type</label>
-                        <select id="txn-type" required>
-                            <option value="debit">Debit (You Gave)</option>
-                            <option value="credit">Credit (You Received)</option>
-                            <option value="waiver">Interest Waiver (Forgiven)</option>
-                            <option value="adjustment">Principal Adjustment (Reduce Debt)</option>
-                        </select>
+                        <label>Date</label>
+                        <input type="date" id="txn-date" required>
                     </div>
+                    <div class="form-group">
+                        <label>Amount (₹)</label>
+                        <input type="number" id="txn-amount" step="0.01" min="0.01" placeholder="0.00" required>
+                    </div>
+                </div>
+
+                <div class="form-group-row">
                     <div class="form-group">
                         <label>Category</label>
                         <select id="txn-category" required>
-                            <option value="Cash">Cash</option>
+                            <option value="Cash" selected>Cash</option>
                             <option value="Goods/Grocery">Goods / Grocery</option>
                             <option value="Grain">Grain / Wholesale</option>
                             <option value="System">System / Audit</option>
                         </select>
                     </div>
+                    <div class="form-group" id="special-txn-type-wrapper" style="display: none;">
+                        <label>Special Adjustment Type</label>
+                        <select id="txn-type-special">
+                            <option value="debit">Standard Debit (You Gave)</option>
+                            <option value="credit">Standard Credit (You Received)</option>
+                            <option value="waiver">Interest Waiver (Forgiven)</option>
+                            <option value="adjustment">Principal Adjustment</option>
+                        </select>
+                    </div>
                 </div>
+
                 <div class="form-group">
-                    <label>Amount (₹)</label>
-                    <input type="number" id="txn-amount" step="0.01" min="0.01" required>
+                    <label>Remarks / Notes (Optional)</label>
+                    <input type="text" id="txn-remarks" placeholder="e.g. 5 bags wheat or Bill #104">
                 </div>
-                <div class="form-group">
-                    <label>Remarks / Audit Note</label>
-                    <input type="text" id="txn-remarks" placeholder="e.g. 5 bags wheat or Audit correction" required>
-                </div>
-                <button type="submit" class="btn-primary full-width">Commit Transaction</button>
+
+                <!-- Advanced Interest Options Accordion -->
+                <details id="advanced-interest-accordion" class="advanced-options-accordion">
+                    <summary class="advanced-options-summary">
+                        <i class="ph ph-sliders"></i> Advanced Interest Options
+                    </summary>
+                    <div class="advanced-options-content">
+                        <div class="form-group">
+                            <label for="txn-interest-start-date">Calculate Interest From (Grace Period Start Date)</label>
+                            <input type="date" id="txn-interest-start-date">
+                            <small class="text-secondary">Defaults to transaction date. Select future date to provide an interest-free grace period.</small>
+                        </div>
+                        <div class="form-group-row">
+                            <div class="form-group">
+                                <label for="txn-interest-rate">Interest Rate (% / yr)</label>
+                                <input type="number" id="txn-interest-rate" step="0.1" placeholder="Auto-populated from profile">
+                            </div>
+                            <div class="form-group">
+                                <label for="txn-interest-type">Interest Type</label>
+                                <select id="txn-interest-type">
+                                    <option value="simple">Simple Interest</option>
+                                    <option value="compound">Compound Interest</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group schedule-builder-section">
+                            <div class="schedule-builder-header">
+                                <label class="schedule-builder-label"><i class="ph ph-percent"></i> Multi-Phase Schedule Builder</label>
+                            </div>
+                            <div id="interest-schedule-container" class="interest-schedule-container">
+                                <!-- Dynamic Phase Cards Rendered via JS -->
+                            </div>
+                            <button type="button" id="btn-add-phase" class="btn-add-phase-btn">
+                                <i class="ph ph-plus-circle"></i> + Add Next Phase
+                            </button>
+                        </div>
+                    </div>
+                </details>
+
+                <button type="submit" class="btn-primary full-width" style="margin-top: 16px;">Save Entry</button>
             </form>
+        </div>
+    </div>
+
+    <!-- Transaction Detail Modal (Directive 2) -->
+    <div id="txn-detail-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3><i class="ph ph-receipt"></i> Transaction Details</h3>
+                <button class="btn-close modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <div id="txn-detail-body" style="padding: 12px 0;">
+                <!-- Populated dynamically via JS -->
+            </div>
         </div>
     </div>
 
