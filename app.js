@@ -413,6 +413,11 @@ document.addEventListener('click', (e) => {
 
 // --- CORE FINANCIAL MATH ENGINE ---
 // --- CORE FINANCIAL MATH ENGINE ---
+function roundMoney(value) {
+    const num = typeof value === 'number' ? value : (parseFloat(value) || 0);
+    return Math.round((num + Number.EPSILON) * 100) / 100;
+}
+
 function calculateLedger(customerId, asOfDateStr = null) {
     const customer = state.customers.find(c => c.id === customerId);
     const rawRate = customer?.lendingRate;
@@ -467,15 +472,16 @@ function calculateLedger(customerId, asOfDateStr = null) {
 
             const windowStart = new Date(Math.max(fromDate.getTime(), phaseStart.getTime()));
             const windowEnd = new Date(Math.min(toDate.getTime(), phaseEnd.getTime()));
-
-            const days = (windowEnd - windowStart) / (1000 * 60 * 60 * 24);
+            const dStart = new Date(windowStart.getFullYear(), windowStart.getMonth(), windowStart.getDate());
+            const dEnd = new Date(windowEnd.getFullYear(), windowEnd.getMonth(), windowEnd.getDate());
+            const days = (dEnd.getTime() - dStart.getTime()) / 86400000;
             if (days <= 0) continue;
 
             const rateFrac = (parseFloat(phase.rate) || 0) / 100;
             let phaseInterest = 0;
 
             if (phase.type === 'simple' && rateFrac > 0) {
-                phaseInterest = currentPrincipal * rateFrac * (days / 365);
+                phaseInterest = roundMoney(currentPrincipal * rateFrac * (days / 365));
             } else if (phase.type === 'compound' && rateFrac > 0) {
                 let freqNum = 1;
                 let periodDays = 365;
@@ -505,15 +511,15 @@ function calculateLedger(customerId, asOfDateStr = null) {
                 }
 
                 const multiplier = Math.pow(1 + rateFrac / freqNum, days / periodDays);
-                phaseInterest = currentPrincipal * (multiplier - 1);
+                phaseInterest = roundMoney(currentPrincipal * (multiplier - 1));
             }
 
-            totalAccrued += phaseInterest;
+            totalAccrued = roundMoney(totalAccrued + phaseInterest);
 
             // Capitalize simple interest into principal when transitioning to compound phase
             const nextPhase = phases[i + 1];
             if (phase.type === 'simple' && nextPhase && nextPhase.type === 'compound') {
-                currentPrincipal += phaseInterest;
+                currentPrincipal = roundMoney(currentPrincipal + phaseInterest);
             }
         }
 
@@ -522,8 +528,8 @@ function calculateLedger(customerId, asOfDateStr = null) {
 
     // Helper: Accrue interest on all active Debit Silos up to targetDate
     function updateAllSilosInterestUpTo(targetDate) {
-        const totalPrincipal = debitSilos.reduce((sum, s) => sum + s.principalRemaining, 0);
-        const netRunningPrincipal = totalPrincipal - excessCredit;
+        const totalPrincipal = debitSilos.reduce((sum, s) => roundMoney(sum + s.principalRemaining), 0);
+        const netRunningPrincipal = roundMoney(totalPrincipal - excessCredit);
 
         debitSilos.forEach(silo => {
             if (silo.principalRemaining > 0) {
@@ -531,12 +537,14 @@ function calculateLedger(customerId, asOfDateStr = null) {
                 const toDate = targetDate;
 
                 if (fromDate && toDate && fromDate < toDate) {
-                    const days = (toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24);
+                    const dFrom = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
+                    const dTo = new Date(toDate.getFullYear(), toDate.getMonth(), toDate.getDate());
+                    const days = (dTo.getTime() - dFrom.getTime()) / 86400000;
 
                     if (netRunningPrincipal > 0) {
                         // Customer owes Merchant -> Accrue interest at configured rate
                         const addInt = calculateSiloInterest(silo, fromDate, toDate);
-                        silo.accruedInterest += addInt;
+                        silo.accruedInterest = roundMoney(silo.accruedInterest + addInt);
                     } else if (days > 0) {
                         // Merchant owes Customer / Advance State -> Halt interest accrual (strictly 0%)
                         silo.hasAdvancePeriod = true;
@@ -564,7 +572,7 @@ function calculateLedger(customerId, asOfDateStr = null) {
         // Accrue interest up to transaction date
         updateAllSilosInterestUpTo(txnDate);
 
-        const amount = Math.round((parseFloat(txn.amount) || 0) * 100) / 100;
+        const amount = roundMoney(parseFloat(txn.amount) || 0);
         const type = (txn.type || '').toLowerCase();
 
         let paymentTraceNotes = [];
@@ -586,10 +594,10 @@ function calculateLedger(customerId, asOfDateStr = null) {
 
             if (excessCredit > 0) {
                 if (excessCredit >= newSilo.principalRemaining) {
-                    excessCredit -= newSilo.principalRemaining;
+                    excessCredit = roundMoney(excessCredit - newSilo.principalRemaining);
                     newSilo.principalRemaining = 0;
                 } else {
-                    newSilo.principalRemaining -= excessCredit;
+                    newSilo.principalRemaining = roundMoney(newSilo.principalRemaining - excessCredit);
                     excessCredit = 0;
                 }
             }
@@ -606,11 +614,11 @@ function calculateLedger(customerId, asOfDateStr = null) {
                 if (silo.accruedInterest > 0) {
                     const dateStr = formatDate(silo.date);
                     if (payment >= silo.accruedInterest) {
-                        payment -= silo.accruedInterest;
+                        payment = roundMoney(payment - silo.accruedInterest);
                         silo.accruedInterest = 0;
                         paymentTraceNotes.push(`Cleared ${dateStr} Interest`);
                     } else {
-                        silo.accruedInterest -= payment;
+                        silo.accruedInterest = roundMoney(silo.accruedInterest - payment);
                         payment = 0;
                         paymentTraceNotes.push(`Reduced ${dateStr} Interest`);
                     }
@@ -625,11 +633,11 @@ function calculateLedger(customerId, asOfDateStr = null) {
                     if (silo.principalRemaining > 0) {
                         const dateStr = formatDate(silo.date);
                         if (payment >= silo.principalRemaining) {
-                            payment -= silo.principalRemaining;
+                            payment = roundMoney(payment - silo.principalRemaining);
                             silo.principalRemaining = 0;
                             paymentTraceNotes.push(`Cleared ${dateStr} Principal`);
                         } else {
-                            silo.principalRemaining -= payment;
+                            silo.principalRemaining = roundMoney(silo.principalRemaining - payment);
                             payment = 0;
                             paymentTraceNotes.push(`Reduced ${dateStr} Principal`);
                         }
@@ -639,7 +647,7 @@ function calculateLedger(customerId, asOfDateStr = null) {
 
             // Excess payment tracked as credit balance
             if (payment > 0) {
-                excessCredit += payment;
+                excessCredit = roundMoney(excessCredit + payment);
                 paymentTraceNotes.push(`Excess Credit`);
             }
         }
@@ -650,10 +658,10 @@ function calculateLedger(customerId, asOfDateStr = null) {
                 const silo = debitSilos[i];
                 if (silo.accruedInterest > 0) {
                     if (waiverAmt >= silo.accruedInterest) {
-                        waiverAmt -= silo.accruedInterest;
+                        waiverAmt = roundMoney(waiverAmt - silo.accruedInterest);
                         silo.accruedInterest = 0;
                     } else {
-                        silo.accruedInterest -= waiverAmt;
+                        silo.accruedInterest = roundMoney(silo.accruedInterest - waiverAmt);
                         waiverAmt = 0;
                     }
                 }
@@ -666,24 +674,24 @@ function calculateLedger(customerId, asOfDateStr = null) {
                 const silo = debitSilos[i];
                 if (silo.principalRemaining > 0) {
                     if (adjAmt >= silo.principalRemaining) {
-                        adjAmt -= silo.principalRemaining;
+                        adjAmt = roundMoney(adjAmt - silo.principalRemaining);
                         silo.principalRemaining = 0;
                     } else {
-                        silo.principalRemaining -= adjAmt;
+                        silo.principalRemaining = roundMoney(silo.principalRemaining - adjAmt);
                         adjAmt = 0;
                     }
                 }
             }
         }
 
-        const currentPrincipalSum = debitSilos.reduce((sum, s) => sum + s.principalRemaining, 0) - excessCredit;
-        const currentInterestSum = debitSilos.reduce((sum, s) => sum + s.accruedInterest, 0);
+        const currentPrincipalSum = roundMoney(debitSilos.reduce((sum, s) => roundMoney(sum + s.principalRemaining), 0) - excessCredit);
+        const currentInterestSum = roundMoney(debitSilos.reduce((sum, s) => roundMoney(sum + s.accruedInterest), 0));
 
         computedLedgerRows.push({
             ...txn,
-            runningPrincipal: Math.round(currentPrincipalSum * 100) / 100,
-            runningInterest: Math.round(currentInterestSum * 100) / 100,
-            totalNet: Math.round((currentPrincipalSum + currentInterestSum) * 100) / 100,
+            runningPrincipal: currentPrincipalSum,
+            runningInterest: currentInterestSum,
+            totalNet: roundMoney(currentPrincipalSum + currentInterestSum),
             paymentTrace: paymentTraceNotes.join(', ')
         });
     });
@@ -691,17 +699,14 @@ function calculateLedger(customerId, asOfDateStr = null) {
     // Final Accrual up to As-Of Date
     updateAllSilosInterestUpTo(asOfDate);
 
-    let totalPrincipalRemaining = debitSilos.reduce((sum, s) => sum + s.principalRemaining, 0) - excessCredit;
-    let totalAccruedInterest = debitSilos.reduce((sum, s) => sum + s.accruedInterest, 0);
-
-    totalPrincipalRemaining = Math.round(totalPrincipalRemaining * 100) / 100;
-    totalAccruedInterest = Math.round(totalAccruedInterest * 100) / 100;
-    const netOutstanding = Math.round((totalPrincipalRemaining + totalAccruedInterest) * 100) / 100;
+    let totalPrincipalRemaining = roundMoney(debitSilos.reduce((sum, s) => roundMoney(sum + s.principalRemaining), 0) - excessCredit);
+    let totalAccruedInterest = roundMoney(debitSilos.reduce((sum, s) => roundMoney(sum + s.accruedInterest), 0));
+    const netOutstanding = roundMoney(totalPrincipalRemaining + totalAccruedInterest);
 
     let status = 'active';
     if (netOutstanding > 0 && txns.length > 0) {
         const lastTxnDate = new Date(txns[txns.length - 1].date);
-        const daysSinceActivity = (asOfDate - lastTxnDate) / (1000 * 60 * 60 * 24);
+        const daysSinceActivity = (asOfDate.getTime() - lastTxnDate.getTime()) / 86400000;
         if (daysSinceActivity > 60) status = 'overdue';
         else if (daysSinceActivity > 30) status = 'warning';
     }
@@ -757,9 +762,9 @@ function renderDashboard(searchTerm = '') {
         const netClass = isCredit ? 'text-success' : (ledger.totalNet > 0 ? 'text-danger' : '');
         
         // Accurate summation
-        globalPrincipal += ledger.totalPrincipalRemaining;
-        globalInterest += ledger.totalAccruedInterest;
-        globalNet += ledger.netOutstanding;
+        globalPrincipal = roundMoney(globalPrincipal + ledger.totalPrincipalRemaining);
+        globalInterest = roundMoney(globalInterest + ledger.totalAccruedInterest);
+        globalNet = roundMoney(globalNet + ledger.netOutstanding);
 
         let statusBadge = `<span class="status-badge status-active">Active</span>`;
         if (ledger.status === 'overdue') statusBadge = `<span class="status-badge status-overdue">Overdue</span>`;
@@ -768,7 +773,12 @@ function renderDashboard(searchTerm = '') {
         const tr = document.createElement('tr');
         tr.onclick = () => openLedger(customer.id);
         tr.innerHTML = `
-            <td><strong>${customer.name}</strong><br><small class="text-secondary">${customer.phoneNumber || ''}</small></td>
+            <td>
+                <div class="customer-cell-flex">
+                    <span class="customer-cell-name">${customer.name}</span>
+                    <span class="customer-cell-phone">${customer.phoneNumber || ''}</span>
+                </div>
+            </td>
             <td>${statusBadge}</td>
             <td class="text-right ${netClass}"><strong>${formatCurrency(Math.abs(ledger.totalNet))}</strong> ${ledger.totalNet < 0 ? '(Cr)' : (ledger.totalNet > 0 ? '(Dr)' : '')}</td>
             <td class="text-right">
@@ -995,6 +1005,10 @@ document.getElementById('search-input').addEventListener('input', (e) => {
 document.getElementById('btn-new-customer').onclick = () => {
     document.getElementById('customer-form').reset();
     document.getElementById('cust-id').value = '';
+    const interestTypeSelect = document.getElementById('cust-interest-type');
+    if (interestTypeSelect) interestTypeSelect.value = 'simple';
+    const freqGroup = document.getElementById('cust-compound-freq-group');
+    if (freqGroup) freqGroup.classList.add('hidden');
     const delBtn = document.getElementById('btn-delete-customer-modal');
     if (delBtn) delBtn.style.display = 'none';
     toggleModal('customer-modal', true);
@@ -1010,14 +1024,39 @@ function editCustomer(id) {
         document.getElementById('cust-address').value = customer.address || '';
         document.getElementById('cust-lend-rate').value = customer.lendingRate || '';
         document.getElementById('cust-dep-rate').value = customer.depositRate || '';
-        const defTypeInput = document.getElementById('cust-default-interest-type');
-        if (defTypeInput) defTypeInput.value = customer.defaultInterestType || 'simple';
+
+        const typeSelect = document.getElementById('cust-interest-type');
+        if (typeSelect) typeSelect.value = customer.defaultInterestType || customer.interestType || 'simple';
+
+        const freqSelect = document.getElementById('cust-compound-freq');
+        if (freqSelect) freqSelect.value = customer.compoundingFrequency || customer.compoundFrequency || 'monthly';
+
+        const freqGroup = document.getElementById('cust-compound-freq-group');
+        if (freqGroup) {
+            const currentType = customer.defaultInterestType || customer.interestType || 'simple';
+            if (currentType === 'compound') {
+                freqGroup.classList.remove('hidden');
+            } else {
+                freqGroup.classList.add('hidden');
+            }
+        }
 
         const delBtn = document.getElementById('btn-delete-customer-modal');
         if (delBtn) delBtn.style.display = 'inline-block';
         toggleModal('customer-modal', true);
     }
 }
+
+document.getElementById('cust-interest-type')?.addEventListener('change', (e) => {
+    const freqGroup = document.getElementById('cust-compound-freq-group');
+    if (freqGroup) {
+        if (e.target.value === 'compound') {
+            freqGroup.classList.remove('hidden');
+        } else {
+            freqGroup.classList.add('hidden');
+        }
+    }
+});
 
 document.getElementById('btn-delete-customer-modal')?.addEventListener('click', () => {
     const custId = document.getElementById('cust-id').value;
@@ -1066,7 +1105,8 @@ document.getElementById('customer-form').onsubmit = async (e) => {
             const address = document.getElementById('cust-address').value.trim();
             const lendingRate = parseFloat(document.getElementById('cust-lend-rate').value);
             const depositRate = parseFloat(document.getElementById('cust-dep-rate').value);
-            const defaultInterestType = document.getElementById('cust-default-interest-type').value;
+            const defaultInterestType = document.getElementById('cust-interest-type')?.value || 'simple';
+            const compoundingFrequency = document.getElementById('cust-compound-freq')?.value || 'monthly';
 
             const customerData = {
                 name,
@@ -1074,7 +1114,8 @@ document.getElementById('customer-form').onsubmit = async (e) => {
                 address,
                 lendingRate,
                 depositRate,
-                defaultInterestType
+                defaultInterestType,
+                compoundingFrequency
             };
 
             const idx = state.customers.findIndex(c => c.id === id);
@@ -1131,7 +1172,8 @@ document.getElementById('customer-form').onsubmit = async (e) => {
         const address = document.getElementById('cust-address').value.trim();
         const lendingRate = parseFloat(document.getElementById('cust-lend-rate').value);
         const depositRate = parseFloat(document.getElementById('cust-dep-rate').value);
-        const defaultInterestType = document.getElementById('cust-default-interest-type').value;
+        const defaultInterestType = document.getElementById('cust-interest-type')?.value || 'simple';
+        const compoundingFrequency = document.getElementById('cust-compound-freq')?.value || 'monthly';
 
         const customerData = {
             id: 'cust-' + Date.now(),
@@ -1141,6 +1183,7 @@ document.getElementById('customer-form').onsubmit = async (e) => {
             lendingRate,
             depositRate,
             defaultInterestType,
+            compoundingFrequency,
             createdAt: new Date().toISOString()
         };
 
@@ -1184,10 +1227,14 @@ function getCustomerDefaultInterestRate() {
 }
 
 function createDefaultInterestPhase(defaultRate) {
+    const customer = state.currentCustomerId ? state.customers.find(c => c.id === state.currentCustomerId) : null;
+    const type = customer?.defaultInterestType || customer?.interestType || 'simple';
+    const frequency = customer?.compoundingFrequency || customer?.compoundFrequency || 'monthly';
+    const rate = type === 'none' ? 0 : (typeof defaultRate === 'number' ? defaultRate : getCustomerDefaultInterestRate());
     return {
-        type: 'simple',
-        rate: typeof defaultRate === 'number' ? defaultRate : getCustomerDefaultInterestRate(),
-        frequency: 'yearly',
+        type,
+        rate,
+        frequency: type === 'compound' ? frequency : 'yearly',
         customDays: null,
         endDate: ''
     };
@@ -1334,6 +1381,14 @@ function getTxnInterestPhases(txn, defaultRate = 12) {
         endDate: null
     }];
 }
+
+// Smart Date Binding: Auto-update interestStartDate when txn-date changes
+document.getElementById('txn-date')?.addEventListener('change', (e) => {
+    const interestStartInput = document.getElementById('txn-interest-start-date');
+    if (interestStartInput) {
+        interestStartInput.value = e.target.value;
+    }
+});
 
 // Transaction Form Modal Handlers
 function openAddTransactionModal(type = 'debit') {

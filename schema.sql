@@ -25,11 +25,15 @@ CREATE TABLE IF NOT EXISTS customers (
     phone_number VARCHAR(50),
     lending_rate NUMERIC(5, 2) DEFAULT 0.00,
     deposit_rate NUMERIC(5, 2) DEFAULT 0.00,
+    default_interest_type VARCHAR(50) DEFAULT 'simple',
+    compounding_frequency VARCHAR(50) DEFAULT 'monthly',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
--- Safeguard: Guarantee merchant_id column exists if table was pre-existing
+-- Safeguard: Guarantee merchant_id and granular interest columns exist if table was pre-existing
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS default_interest_type VARCHAR(50) DEFAULT 'simple';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS compounding_frequency VARCHAR(50) DEFAULT 'monthly';
 
 -- 3. INVENTORY ITEMS TABLE (Stock Management)
 CREATE TABLE IF NOT EXISTS items (

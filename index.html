@@ -596,20 +596,20 @@
                     </div>
                 </div>
 
+                <!-- Mobile-First Sticky Action Bar -->
+                <div class="khata-bottom-bar">
+                    <button type="button" id="btn-ledger-gave" class="btn-khata btn-khata-gave">
+                        <i class="ph ph-arrow-up-right"></i> You Gave
+                    </button>
+                    <button type="button" id="btn-ledger-got" class="btn-khata btn-khata-got">
+                        <i class="ph ph-arrow-down-left"></i> You Got
+                    </button>
+                </div>
+
                 <div id="transaction-list-container" class="transaction-list-container">
                     <div id="transaction-list-body" class="khata-list-body">
                         <!-- Mobile-first transaction list rendered dynamically -->
                     </div>
-                </div>
-
-                <!-- Mobile-First Fixed Bottom Action Bar -->
-                <div class="khata-bottom-bar">
-                    <button type="button" id="btn-ledger-gave" class="btn-khata btn-khata-gave">
-                        <i class="ph ph-arrow-up-right"></i> You Gave (Red)
-                    </button>
-                    <button type="button" id="btn-ledger-got" class="btn-khata btn-khata-got">
-                        <i class="ph ph-arrow-down-left"></i> You Got (Green)
-                    </button>
                 </div>
             </section>
             <section id="reports-view" class="view hidden tab-content">
@@ -932,12 +932,23 @@
                         <input type="number" id="cust-dep-rate" step="0.1" placeholder="6" required>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>Default Interest Calculation Method</label>
-                    <select id="cust-default-interest-type">
-                        <option value="simple" selected>Simple Interest (No compounding)</option>
-                        <option value="compound">Compound Interest (Monthly)</option>
-                    </select>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label for="cust-interest-type">Interest Type</label>
+                        <select id="cust-interest-type">
+                            <option value="none">None (0% Interest)</option>
+                            <option value="simple" selected>Simple Interest</option>
+                            <option value="compound">Compound Interest</option>
+                        </select>
+                    </div>
+                    <div class="form-group hidden" id="cust-compound-freq-group">
+                        <label for="cust-compound-freq">Frequency</label>
+                        <select id="cust-compound-freq">
+                            <option value="monthly" selected>Monthly</option>
+                            <option value="half-yearly">Half-Yearly</option>
+                            <option value="yearly">Yearly</option>
+                        </select>
+                    </div>
                 </div>
                 <div style="display: flex; gap: 10px; margin-top: 16px;">
                     <button type="submit" class="btn-primary" style="flex: 1;">Save Customer</button>

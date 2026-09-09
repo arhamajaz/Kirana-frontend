@@ -726,13 +726,28 @@ button {
 
 .data-table { 
     width: 100%; 
-    min-width: 640px; /* Safe scroll width for tables on narrow mobile screens */
     border-collapse: collapse; 
 }
 .data-table th, .data-table td { 
-    padding: 16px 20px; 
+    padding: 12px 14px; 
     border-bottom: 1px solid var(--border-color); 
     text-align: left; 
+}
+
+/* Stacked Mobile Customer Cell */
+.customer-cell-flex {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.customer-cell-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-color);
+}
+.customer-cell-phone {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
 }
 .data-table th { 
     color: var(--text-secondary); 
@@ -1854,19 +1869,20 @@ input:focus, select:focus, textarea:focus {
     color: var(--text-secondary);
 }
 
-/* Mobile Fixed Bottom Action Bar */
+/* Sticky Action Bar below Summary Cards */
 .khata-bottom-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    position: sticky;
+    top: 0;
     background: var(--surface-color);
-    border-top: 1px solid var(--border-color);
+    border: 1px solid var(--border-color);
     padding: 12px 16px;
     display: flex;
     gap: 12px;
-    z-index: 100;
-    box-shadow: var(--nav-shadow);
+    z-index: 50;
+    box-shadow: var(--card-shadow);
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+    border-radius: 12px;
 }
 
 .btn-khata {
@@ -1889,15 +1905,15 @@ input:focus, select:focus, textarea:focus {
 }
 
 .btn-khata-gave {
-    background: var(--debit-accent);
+    background: #dc2626;
     color: #ffffff;
-    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
+    box-shadow: 0 4px 14px rgba(220, 38, 38, 0.35);
 }
 
 .btn-khata-got {
-    background: var(--credit-accent);
+    background: #16a34a;
     color: #ffffff;
-    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+    box-shadow: 0 4px 14px rgba(22, 163, 74, 0.35);
 }
 
 /* Smart Modal Segmented Toggle Bar */
