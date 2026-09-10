@@ -562,7 +562,10 @@
                         <button id="btn-back" class="btn-secondary">
                             <i class="ph ph-arrow-left"></i> Back
                         </button>
-                        <h2 id="ledger-customer-name">Customer Name</h2>
+                        <div class="ledger-customer-info">
+                            <h2 id="ledger-customer-name">Customer Name</h2>
+                            <div id="ledger-customer-phone" class="ledger-customer-phone"></div>
+                        </div>
                     </div>
                     <div class="ledger-header-actions">
                         <div class="date-picker-group">
@@ -973,10 +976,10 @@
                 <!-- Color-Coded Top Toggle -->
                 <div class="txn-type-toggle-bar">
                     <button type="button" id="toggle-type-debit" class="txn-type-btn btn-debit active">
-                        <i class="ph ph-arrow-up-right"></i> You Gave (Red)
+                        <i class="ph ph-arrow-up-right"></i> You Gave
                     </button>
                     <button type="button" id="toggle-type-credit" class="txn-type-btn btn-credit">
-                        <i class="ph ph-arrow-down-left"></i> You Got (Green)
+                        <i class="ph ph-arrow-down-left"></i> You Got
                     </button>
                 </div>
                 <input type="hidden" id="txn-type" value="debit">

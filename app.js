@@ -453,7 +453,7 @@ function calculateLedger(customerId, asOfDateStr = null) {
         }
 
         let totalAccrued = 0;
-        const phases = getTxnInterestPhases(silo, defaultLendingRate);
+        const phases = getTxnInterestPhases(silo, defaultLendingRate, customer);
         let currentPrincipal = silo.principalRemaining;
         const siloStart = interestStart;
 
@@ -474,7 +474,7 @@ function calculateLedger(customerId, asOfDateStr = null) {
             const windowEnd = new Date(Math.min(toDate.getTime(), phaseEnd.getTime()));
             const dStart = new Date(windowStart.getFullYear(), windowStart.getMonth(), windowStart.getDate());
             const dEnd = new Date(windowEnd.getFullYear(), windowEnd.getMonth(), windowEnd.getDate());
-            const days = (dEnd.getTime() - dStart.getTime()) / 86400000;
+            const days = Math.floor((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24));
             if (days <= 0) continue;
 
             const rateFrac = (parseFloat(phase.rate) || 0) / 100;
@@ -510,8 +510,14 @@ function calculateLedger(customerId, asOfDateStr = null) {
                         break;
                 }
 
-                const multiplier = Math.pow(1 + rateFrac / freqNum, days / periodDays);
-                phaseInterest = roundMoney(currentPrincipal * (multiplier - 1));
+                // Banking Standard Hybrid Compounding: Full periods compounded + remaining days simple
+                const periodRate = rateFrac / freqNum;
+                const fullPeriods = Math.floor(days / periodDays);
+                const remainingDays = days - (fullPeriods * periodDays);
+
+                const amountAfterFull = currentPrincipal * Math.pow(1 + periodRate, fullPeriods);
+                const finalAmount = amountAfterFull + (amountAfterFull * periodRate * (remainingDays / periodDays));
+                phaseInterest = roundMoney(finalAmount - currentPrincipal);
             }
 
             totalAccrued = roundMoney(totalAccrued + phaseInterest);
@@ -826,7 +832,10 @@ async function openLedger(customerId) {
     state.currentCustomerId = customerId;
     const customer = state.customers.find(c => c.id === customerId);
     if (customer) {
-        document.getElementById('ledger-customer-name').textContent = customer.name;
+        const nameEl = document.getElementById('ledger-customer-name');
+        if (nameEl) nameEl.textContent = customer.name;
+        const phoneEl = document.getElementById('ledger-customer-phone');
+        if (phoneEl) phoneEl.textContent = customer.phoneNumber ? `📱 ${customer.phoneNumber}` : '';
     }
     
     switchView('ledger-view');
@@ -843,7 +852,7 @@ async function openLedger(customerId) {
                 id: tx.id,
                 customerId: tx.customerId,
                 date: tx.date,
-                interestDate: tx.interestStartDate || tx.date,
+                interestStartDate: tx.interestStartDate || tx.date,
                 type: tx.type.toLowerCase(),
                 category: tx.category || 'Cash',
                 amount: tx.amount,
@@ -878,6 +887,14 @@ function formatPhaseSummaryBadge(phases) {
 
 function renderLedger() {
     if (!state.currentCustomerId) return;
+
+    const customer = state.customers.find(c => c.id === state.currentCustomerId);
+    if (customer) {
+        const nameEl = document.getElementById('ledger-customer-name');
+        if (nameEl) nameEl.textContent = customer.name;
+        const phoneEl = document.getElementById('ledger-customer-phone');
+        if (phoneEl) phoneEl.textContent = customer.phoneNumber ? `📱 ${customer.phoneNumber}` : '';
+    }
     
     const asOfDateInput = document.getElementById('ledger-as-of-date');
     const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
@@ -899,7 +916,7 @@ function renderLedger() {
 
     const rows = ledger.rows || [];
     if (rows.length === 0) {
-        listBody.innerHTML = `<div class="text-center text-secondary" style="padding: 2rem; background: var(--surface-color); border-radius: 12px; border: 1px solid var(--border-color);">No transactions recorded for this customer. Tap 'You Gave' or 'You Got' below to add an entry.</div>`;
+        listBody.innerHTML = `<div class="text-center text-secondary" style="padding: 2rem; background: var(--surface-color); border-radius: 12px; border: 1px solid var(--border-color);">No transactions recorded for this customer. Tap 'You Gave' or 'You Got' above to add an entry.</div>`;
         return;
     }
 
@@ -1368,13 +1385,33 @@ if (addPhaseBtn) {
 /**
  * Backward compatibility helper to extract valid interestPhases from a transaction object.
  */
-function getTxnInterestPhases(txn, defaultRate = 12) {
+function getTxnInterestPhases(txn, defaultRate = 12, customer = null) {
     if (txn && Array.isArray(txn.interestPhases) && txn.interestPhases.length > 0) {
         return txn.interestPhases;
     }
     const legacyRate = typeof txn?.interestRate === 'number' ? txn.interestRate : (defaultRate || 12);
+    const iType = (txn?.interestType || customer?.defaultInterestType || customer?.interestType || 'simple').toLowerCase();
+    const freq = (txn?.compoundingFrequency || customer?.compoundingFrequency || customer?.compoundFrequency || 'monthly').toLowerCase();
+
+    if (iType === 'none') {
+        return [{
+            type: 'none',
+            rate: 0,
+            frequency: 'yearly',
+            customDays: null,
+            endDate: null
+        }];
+    } else if (iType === 'compound') {
+        return [{
+            type: 'compound',
+            rate: legacyRate,
+            frequency: freq,
+            customDays: null,
+            endDate: null
+        }];
+    }
     return [{
-        type: legacyRate > 0 ? 'simple' : 'none',
+        type: 'simple',
         rate: legacyRate,
         frequency: 'yearly',
         customDays: null,
@@ -1383,12 +1420,14 @@ function getTxnInterestPhases(txn, defaultRate = 12) {
 }
 
 // Smart Date Binding: Auto-update interestStartDate when txn-date changes
-document.getElementById('txn-date')?.addEventListener('change', (e) => {
+const syncInterestStartDate = (e) => {
     const interestStartInput = document.getElementById('txn-interest-start-date');
-    if (interestStartInput) {
+    if (interestStartInput && e.target.value) {
         interestStartInput.value = e.target.value;
     }
-});
+};
+document.getElementById('txn-date')?.addEventListener('change', syncInterestStartDate);
+document.getElementById('txn-date')?.addEventListener('input', syncInterestStartDate);
 
 // Transaction Form Modal Handlers
 function openAddTransactionModal(type = 'debit') {
@@ -3291,10 +3330,63 @@ function showInterestBreakdown(txnId = null) {
         totalLedgerInterest += accruedInterest;
 
         let formulaStr = '';
-        if (interestType === 'simple') {
-            formulaStr = `${formatCurrency(principalAmt)} × ${rate}% × (${totalDays} / 365 days)`;
+        let breakdownRule = '';
+
+        if (interestType === 'none') {
+            breakdownRule = '0% Interest (None)';
+            formulaStr = `${formatCurrency(principalAmt)} × 0% = ₹0.00`;
+        } else if (interestType === 'simple') {
+            breakdownRule = `Simple Interest (${rate}% p.a.)`;
+            formulaStr = `${formatCurrency(principalAmt)} × ${rate}% × (${totalDays} / 365 days) = ${formatCurrency(accruedInterest)}`;
         } else {
-            formulaStr = `${formatCurrency(principalAmt)} × [ (1 + ${rate}% / 12) ^ (${totalDays} / 30.41) - 1 ]`;
+            const compFreq = (txn.compoundingFrequency || customer?.compoundingFrequency || customer?.compoundFrequency || 'yearly').toLowerCase();
+            let freqNum = 1;
+            let periodDays = 365;
+            let freqLabel = 'Year';
+
+            switch (compFreq) {
+                case 'monthly':
+                    freqNum = 12;
+                    periodDays = 365 / 12;
+                    freqLabel = 'Month';
+                    break;
+                case 'half-yearly':
+                    freqNum = 2;
+                    periodDays = 365 / 2;
+                    freqLabel = 'Half-Year';
+                    break;
+                case 'quarterly':
+                    freqNum = 4;
+                    periodDays = 365 / 4;
+                    freqLabel = 'Quarter';
+                    break;
+                case 'yearly':
+                default:
+                    freqNum = 1;
+                    periodDays = 365;
+                    freqLabel = 'Year';
+                    break;
+            }
+
+            const periodRate = (rate / 100) / freqNum;
+            const fullPeriods = Math.floor(totalDays / periodDays);
+            const remDays = Math.round(totalDays - (fullPeriods * periodDays));
+
+            const part1Comp = fullPeriods > 0 ? `${fullPeriods} ${freqLabel}${fullPeriods > 1 ? 's' : ''} Compound (${rate}%)` : '';
+            const part2Simp = remDays > 0 || fullPeriods === 0 ? `${remDays} Days Simple (${rate}%)` : '';
+            breakdownRule = [part1Comp, part2Simp].filter(Boolean).join(' + ');
+
+            const compoundedAmount = roundMoney(principalAmt * Math.pow(1 + periodRate, fullPeriods));
+            const simpleOnCompounded = roundMoney(compoundedAmount * periodRate * (remDays / periodDays));
+
+            if (fullPeriods > 0 && remDays > 0) {
+                formulaStr = `<strong>Step 1 (${fullPeriods} ${freqLabel}${fullPeriods > 1 ? 's' : ''} Compound):</strong> ${formatCurrency(principalAmt)} × (1 + ${rate}% / ${freqNum})^${fullPeriods} = ${formatCurrency(compoundedAmount)}<br>` +
+                             `<strong>Step 2 (${remDays} Days Simple):</strong> ${formatCurrency(compoundedAmount)} + [${formatCurrency(compoundedAmount)} × (${rate}% / ${freqNum}) × (${remDays} / ${roundMoney(periodDays)})] = ${formatCurrency(roundMoney(compoundedAmount + simpleOnCompounded))}`;
+            } else if (fullPeriods > 0) {
+                formulaStr = `<strong>Compound Formula:</strong> ${formatCurrency(principalAmt)} × (1 + ${rate}% / ${freqNum})^${fullPeriods} - ${formatCurrency(principalAmt)} = ${formatCurrency(accruedInterest)}`;
+            } else {
+                formulaStr = `<strong>Simple Formula:</strong> ${formatCurrency(principalAmt)} × ${rate}% × (${totalDays} / 365 days) = ${formatCurrency(accruedInterest)}`;
+            }
         }
 
         html += `
@@ -3312,7 +3404,7 @@ function showInterestBreakdown(txnId = null) {
                     <div><strong>Time Period:</strong> ${formatDate(startDate)} → ${formatDate(toDate)}</div>
                     <div><strong>Duration:</strong> <span class="duration-pill"><i class="ph ph-clock"></i> ${durationText} (${totalDays} Days)</span></div>
                     <div class="calc-math-box">
-                        <div style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 4px;">Formula: Principal × Rate × Time</div>
+                        <div style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 4px;">Rule: ${breakdownRule}</div>
                         <div>${formulaStr}</div>
                         <div style="margin-top: 6px; font-weight: 700; color: var(--debit-accent);">
                             = Accrued Interest: ${formatCurrency(accruedInterest)}

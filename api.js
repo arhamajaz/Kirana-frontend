@@ -307,8 +307,8 @@ async function createCustomer(customerData) {
         phoneNumber: sanitizePhoneNumber(customerData.phoneNumber),
         lendingRate: sanitizeRate(customerData.lendingRate),
         depositRate: sanitizeRate(customerData.depositRate),
-        defaultInterestType: customerData.defaultInterestType ? String(customerData.defaultInterestType).toUpperCase() : "SIMPLE",
-        compoundingFrequency: customerData.compoundingFrequency ? String(customerData.compoundingFrequency).toUpperCase() : "MONTHLY"
+        defaultInterestType: customerData.defaultInterestType ? (String(customerData.defaultInterestType).toUpperCase() === 'NONE' ? 'NO_INTEREST' : String(customerData.defaultInterestType).toUpperCase()) : "SIMPLE",
+        compoundingFrequency: customerData.compoundingFrequency ? String(customerData.compoundingFrequency).toUpperCase().replace('-', '_') : "MONTHLY"
     };
 
     if (payload.compoundingFrequency === "CUSTOM" && customerData.customCompoundDays) {
@@ -324,8 +324,11 @@ async function updateCustomer(id, customerData) {
     if (customerData.phoneNumber !== undefined) payload.phoneNumber = sanitizePhoneNumber(customerData.phoneNumber);
     if (customerData.lendingRate !== undefined) payload.lendingRate = sanitizeRate(customerData.lendingRate);
     if (customerData.depositRate !== undefined) payload.depositRate = sanitizeRate(customerData.depositRate);
-    if (customerData.defaultInterestType !== undefined) payload.defaultInterestType = String(customerData.defaultInterestType).toUpperCase();
-    if (customerData.compoundingFrequency !== undefined) payload.compoundingFrequency = String(customerData.compoundingFrequency).toUpperCase();
+    if (customerData.defaultInterestType !== undefined) {
+        const uType = String(customerData.defaultInterestType).toUpperCase();
+        payload.defaultInterestType = uType === 'NONE' ? 'NO_INTEREST' : uType;
+    }
+    if (customerData.compoundingFrequency !== undefined) payload.compoundingFrequency = String(customerData.compoundingFrequency).toUpperCase().replace('-', '_');
     if (payload.compoundingFrequency === "CUSTOM" && customerData.customCompoundDays) {
         payload.customCompoundDays = parseInt(customerData.customCompoundDays, 10);
     }

@@ -1721,12 +1721,22 @@ input:focus, select:focus, textarea:focus {
     flex-direction: column;
     gap: 12px;
     margin-bottom: 16px;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
 }
 
 .ledger-header-top {
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
+}
+
+.ledger-customer-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .ledger-header-top h2 {
@@ -1735,11 +1745,19 @@ input:focus, select:focus, textarea:focus {
     font-weight: 700;
 }
 
+.ledger-customer-phone {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
 .ledger-header-actions {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    width: 100%;
+    max-width: 100%;
 }
 
 .ledger-header-actions .date-picker-group {
@@ -1772,12 +1790,17 @@ input:focus, select:focus, textarea:focus {
 /* Khata Transaction List */
 .transaction-list-container {
     margin-bottom: 80px; /* Space for fixed bottom bar */
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
 }
 
 .khata-list-body {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    width: 100%;
+    max-width: 100%;
 }
 
 .khata-card {
@@ -1791,6 +1814,8 @@ input:focus, select:focus, textarea:focus {
     cursor: pointer;
     transition: background var(--transition-speed), transform 0.15s ease, border-color var(--transition-speed);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .khata-card:hover, .khata-card:active {
@@ -1945,12 +1970,12 @@ input:focus, select:focus, textarea:focus {
 }
 
 .txn-type-btn.btn-debit.active {
-    background: var(--debit-accent);
+    background: #dc2626;
     color: #ffffff;
 }
 
 .txn-type-btn.btn-credit.active {
-    background: var(--credit-accent);
+    background: #16a34a;
     color: #ffffff;
 }
 
