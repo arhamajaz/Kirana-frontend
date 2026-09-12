@@ -352,6 +352,44 @@ document.addEventListener('DOMContentLoaded', () => {
 function switchView(targetId) {
     if (!targetId) return;
 
+    // Dynamic Sticky Top App Bar vs Hero Navbar Switcher (Directive 1.2)
+    const heroNavbar = document.getElementById('hero-navbar');
+    const compactAppBar = document.getElementById('compact-app-bar');
+    const topBarTitle = document.getElementById('top-bar-title');
+    const topBarSubtitle = document.getElementById('top-bar-subtitle');
+
+    if (targetId === 'dashboard-view') {
+        if (heroNavbar) heroNavbar.classList.remove('hidden');
+        if (compactAppBar) compactAppBar.classList.add('hidden');
+    } else {
+        if (heroNavbar) heroNavbar.classList.add('hidden');
+        if (compactAppBar) compactAppBar.classList.remove('hidden');
+
+        const screenTitles = {
+            'ledger-view': { title: 'Customer Ledger', sub: 'Mohit Store' },
+            'bills-view': { title: 'Bills & Invoices', sub: 'Billing Records' },
+            'items-view': { title: 'Inventory Stock', sub: 'Store Items' },
+            'cashbook-view': { title: 'Daily Cashbook', sub: 'Counter Drawer' },
+            'calculator-view': { title: 'Interest Calculator', sub: 'Loan Schedule' },
+            'reports-view': { title: 'Business Reports', sub: 'Analytics & Tax' },
+            'bad-debts-view': { title: 'Bad Debts & NPA', sub: 'Defaulted Accounts' },
+            'insurance-view': { title: 'Shop Insurance', sub: 'Policy Details' },
+            'more-view': { title: 'More Options', sub: 'Business Profile' }
+        };
+
+        const info = screenTitles[targetId] || { title: 'Mohit Store', sub: 'Merchant System' };
+        if (targetId === 'ledger-view' && state.currentCustomerId) {
+            const customer = state.customers.find(c => c.id === state.currentCustomerId);
+            if (customer) {
+                if (topBarTitle) topBarTitle.textContent = customer.name;
+                if (topBarSubtitle) topBarSubtitle.textContent = customer.phoneNumber ? `📱 ${customer.phoneNumber}` : (customer.isSettled ? 'Settled Account' : 'Active Account');
+            }
+        } else {
+            if (topBarTitle) topBarTitle.textContent = info.title;
+            if (topBarSubtitle) topBarSubtitle.textContent = info.sub;
+        }
+    }
+
     // Hide all views
     document.querySelectorAll('.view').forEach(v => {
         v.classList.remove('active');
@@ -740,25 +778,55 @@ function calculateLedger(customerId, asOfDateStr = null) {
 // --- UI RENDERING FUNCTIONS ---
 function renderDashboard(searchTerm = '') {
     const tbody = document.getElementById('customer-list-body');
+    if (!tbody) return;
     tbody.innerHTML = '';
     
-    const filtered = state.customers.filter(c => 
+    if (!state.currentCustomerTab) state.currentCustomerTab = 'active';
+
+    const activeCustomers = (state.customers || []).filter(c => !c.isSettled);
+    const settledCustomers = (state.customers || []).filter(c => c.isSettled);
+
+    // Update tab counters
+    const countActiveEl = document.getElementById('count-cust-active');
+    const countSettledEl = document.getElementById('count-cust-settled');
+    if (countActiveEl) countActiveEl.textContent = activeCustomers.length;
+    if (countSettledEl) countSettledEl.textContent = settledCustomers.length;
+
+    const currentDataset = state.currentCustomerTab === 'settled' ? settledCustomers : activeCustomers;
+
+    const filtered = currentDataset.filter(c => 
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
         (c.phoneNumber && c.phoneNumber.includes(searchTerm))
     );
-    
-    if (!filtered || filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-secondary" style="padding: 2rem;">No customers found. Click 'New Customer' to begin.</td></tr>`;
-        
-        document.getElementById('dash-stat-principal').textContent = '₹0.00';
-        document.getElementById('dash-stat-interest').textContent = '₹0.00';
-        document.getElementById('dash-stat-net').textContent = '₹0.00';
-        return;
-    }
 
     let globalPrincipal = 0;
     let globalInterest = 0;
     let globalNet = 0;
+
+    activeCustomers.forEach(c => {
+        const ledger = calculateLedger(c.id);
+        globalPrincipal = roundMoney(globalPrincipal + ledger.totalPrincipalRemaining);
+        globalInterest = roundMoney(globalInterest + ledger.totalAccruedInterest);
+        globalNet = roundMoney(globalNet + ledger.netOutstanding);
+    });
+
+    const dashNetEl = document.getElementById('dash-stat-net');
+    if (document.getElementById('dash-stat-principal')) {
+        document.getElementById('dash-stat-principal').textContent = formatCurrency(Math.abs(globalPrincipal));
+        document.getElementById('dash-stat-interest').textContent = formatCurrency(globalInterest);
+        if (dashNetEl) {
+            dashNetEl.textContent = formatCurrency(Math.abs(globalNet)) + (globalNet > 0 ? ' (Dr)' : (globalNet < 0 ? ' (Cr)' : ''));
+            dashNetEl.className = 'amount ' + (globalNet > 0 ? 'text-danger' : (globalNet < 0 ? 'text-success' : ''));
+        }
+    }
+    
+    if (!filtered || filtered.length === 0) {
+        const emptyMsg = state.currentCustomerTab === 'settled'
+            ? 'No settled accounts recorded yet.'
+            : "No active customers found. Click 'New Customer' to begin.";
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-secondary" style="padding: 2rem;">${emptyMsg}</td></tr>`;
+        return;
+    }
 
     const sortedCustomers = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
     
@@ -767,14 +835,14 @@ function renderDashboard(searchTerm = '') {
         const isCredit = ledger.totalNet < 0;
         const netClass = isCredit ? 'text-success' : (ledger.totalNet > 0 ? 'text-danger' : '');
         
-        // Accurate summation
-        globalPrincipal = roundMoney(globalPrincipal + ledger.totalPrincipalRemaining);
-        globalInterest = roundMoney(globalInterest + ledger.totalAccruedInterest);
-        globalNet = roundMoney(globalNet + ledger.netOutstanding);
-
         let statusBadge = `<span class="status-badge status-active">Active</span>`;
-        if (ledger.status === 'overdue') statusBadge = `<span class="status-badge status-overdue">Overdue</span>`;
-        if (ledger.status === 'warning') statusBadge = `<span class="status-badge status-warning">Warning</span>`;
+        if (customer.isSettled) {
+            statusBadge = `<span class="status-badge status-settled"><i class="ph ph-check-circle"></i> Settled (${formatDate(customer.settlementDate)})</span>`;
+        } else if (ledger.status === 'overdue') {
+            statusBadge = `<span class="status-badge status-overdue">Overdue</span>`;
+        } else if (ledger.status === 'warning') {
+            statusBadge = `<span class="status-badge status-warning">Warning</span>`;
+        }
 
         const tr = document.createElement('tr');
         tr.onclick = () => openLedger(customer.id);
@@ -791,7 +859,7 @@ function renderDashboard(searchTerm = '') {
                 <button class="btn-icon" onclick="event.stopPropagation(); editCustomer('${customer.id}')" title="Edit Customer">
                     <i class="ph ph-pencil-simple"></i>
                 </button>
-                ${ledger.totalNet > 0 ? `
+                ${!customer.isSettled && ledger.totalNet > 0 ? `
                     <button class="btn-icon text-danger" onclick="event.stopPropagation(); openMarkBadDebtModal('${customer.id}')" title="Mark as Bad Debt (डूबत)">
                         <i class="ph ph-warning"></i>
                     </button>
@@ -800,14 +868,6 @@ function renderDashboard(searchTerm = '') {
         `;
         tbody.appendChild(tr);
     });
-
-    const dashNetEl = document.getElementById('dash-stat-net');
-    if (document.getElementById('dash-stat-principal')) {
-        document.getElementById('dash-stat-principal').textContent = formatCurrency(Math.abs(globalPrincipal));
-        document.getElementById('dash-stat-interest').textContent = formatCurrency(globalInterest);
-        dashNetEl.textContent = formatCurrency(Math.abs(globalNet)) + (globalNet > 0 ? ' (Dr)' : (globalNet < 0 ? ' (Cr)' : ''));
-        dashNetEl.className = 'amount ' + (globalNet > 0 ? 'text-danger' : (globalNet < 0 ? 'text-success' : ''));
-    }
 }
 
 function renderAnalytics() {
@@ -988,6 +1048,139 @@ function toggleModal(modalId, show) {
     }
 }
 
+// ==========================================
+// --- SETTLEMENT ENGINE & ARCHIVING (Directives 2 & 3) ---
+// ==========================================
+function openSettlementModal(customerId) {
+    if (!customerId) return;
+    const customer = state.customers.find(c => c.id === customerId);
+    if (!customer) return;
+
+    const ledger = calculateLedger(customerId);
+    
+    const custIdEl = document.getElementById('settle-customer-id');
+    const custNameEl = document.getElementById('settle-customer-name');
+    const prinEl = document.getElementById('settle-principal-amount');
+    const intEl = document.getElementById('settle-interest-amount');
+    const grossEl = document.getElementById('settle-gross-amount');
+    const dateInput = document.getElementById('settle-date-input');
+    const discountInput = document.getElementById('settle-discount-input');
+
+    if (custIdEl) custIdEl.value = customerId;
+    if (custNameEl) custNameEl.textContent = customer.name;
+    if (prinEl) prinEl.textContent = formatCurrency(ledger.totalPrincipalRemaining);
+    if (intEl) intEl.textContent = formatCurrency(ledger.totalAccruedInterest);
+    if (grossEl) grossEl.textContent = formatCurrency(ledger.netOutstanding);
+
+    if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+    if (discountInput) discountInput.value = '0.00';
+
+    updateSettlementCalculations();
+    toggleModal('settlement-modal', true);
+}
+
+function updateSettlementCalculations() {
+    const customerId = document.getElementById('settle-customer-id')?.value;
+    if (!customerId) return;
+
+    const ledger = calculateLedger(customerId);
+    const grossOutstanding = ledger.netOutstanding;
+    const discount = parseFloat(document.getElementById('settle-discount-input')?.value) || 0;
+
+    const netPayment = roundMoney(Math.max(0, grossOutstanding - discount));
+    const netDisplay = document.getElementById('settle-net-payment-display');
+    if (netDisplay) {
+        netDisplay.textContent = formatCurrency(netPayment);
+    }
+}
+
+document.getElementById('settle-discount-input')?.addEventListener('input', updateSettlementCalculations);
+
+document.getElementById('settlement-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const customerId = document.getElementById('settle-customer-id').value;
+    const settleDateInput = document.getElementById('settle-date-input').value;
+    const discount = roundMoney(parseFloat(document.getElementById('settle-discount-input').value) || 0);
+
+    if (!customerId || !settleDateInput) return;
+    const customer = state.customers.find(c => c.id === customerId);
+    if (!customer) return;
+
+    const settleDate = new Date(settleDateInput).toISOString();
+    const ledger = calculateLedger(customerId, settleDateInput);
+    const grossOutstanding = ledger.netOutstanding;
+
+    // 1. Process Discount/Waiver if present
+    if (discount > 0) {
+        const waiverTxn = {
+            id: `txn_waiver_${Date.now()}`,
+            customerId,
+            date: settleDate,
+            interestStartDate: settleDate,
+            type: 'waiver',
+            category: 'Settlement Waiver',
+            amount: discount,
+            remarks: `Settlement Interest Waiver / Discount`,
+            isVoid: false,
+            createdAt: new Date().toISOString()
+        };
+        state.transactions.push(waiverTxn);
+    }
+
+    // 2. Process Final Zero-Out Transaction
+    const remainingToZero = roundMoney(grossOutstanding - discount);
+    if (remainingToZero > 0) {
+        // Customer owes merchant -> Credit transaction brings balance to 0
+        const zeroTxn = {
+            id: `txn_settle_${Date.now()}`,
+            customerId,
+            date: settleDate,
+            interestStartDate: settleDate,
+            type: 'credit',
+            category: 'Settlement',
+            amount: remainingToZero,
+            remarks: `Full Account Settlement Payment`,
+            isVoid: false,
+            createdAt: new Date().toISOString()
+        };
+        state.transactions.push(zeroTxn);
+    } else if (grossOutstanding < 0) {
+        // Merchant owed credit to customer -> Debit transaction brings balance to 0
+        const refundAmt = Math.abs(grossOutstanding);
+        const zeroTxn = {
+            id: `txn_settle_${Date.now()}`,
+            customerId,
+            date: settleDate,
+            interestStartDate: settleDate,
+            type: 'debit',
+            category: 'Settlement',
+            amount: refundAmt,
+            remarks: `Account Settlement Credit Refund`,
+            isVoid: false,
+            createdAt: new Date().toISOString()
+        };
+        state.transactions.push(zeroTxn);
+    }
+
+    // 3. Update Customer Profile State as Settled
+    customer.isSettled = true;
+    customer.settlementDate = settleDate;
+
+    saveData();
+    toggleModal('settlement-modal', false);
+
+    if (state.currentCustomerId === customerId) {
+        renderLedger();
+    }
+    renderDashboard();
+});
+
+document.getElementById('btn-settle-account')?.addEventListener('click', () => {
+    if (state.currentCustomerId) {
+        openSettlementModal(state.currentCustomerId);
+    }
+});
+
 document.querySelectorAll('.modal-close').forEach(btn => {
     btn.onclick = (e) => e.target.closest('.modal').classList.add('hidden');
 });
@@ -996,6 +1189,36 @@ document.getElementById('btn-back').onclick = () => {
     state.currentCustomerId = null;
     switchView('dashboard-view');
 };
+
+const btnTopBack = document.getElementById('btn-top-back');
+if (btnTopBack) {
+    btnTopBack.onclick = () => {
+        state.currentCustomerId = null;
+        switchView('dashboard-view');
+    };
+}
+
+const topBarThemeToggle = document.getElementById('top-bar-theme-toggle');
+if (topBarThemeToggle) {
+    topBarThemeToggle.onclick = () => {
+        if (themeToggleBtn) themeToggleBtn.click();
+    };
+}
+
+// Sub-Tab Switchers for Active vs Settled Accounts (Directive 3)
+document.getElementById('tab-cust-active')?.addEventListener('click', () => {
+    state.currentCustomerTab = 'active';
+    document.getElementById('tab-cust-active')?.classList.add('active');
+    document.getElementById('tab-cust-settled')?.classList.remove('active');
+    renderDashboard(document.getElementById('search-input')?.value || '');
+});
+
+document.getElementById('tab-cust-settled')?.addEventListener('click', () => {
+    state.currentCustomerTab = 'settled';
+    document.getElementById('tab-cust-settled')?.classList.add('active');
+    document.getElementById('tab-cust-active')?.classList.remove('active');
+    renderDashboard(document.getElementById('search-input')?.value || '');
+});
 
 let searchDebounceTimer = null;
 document.getElementById('search-input').addEventListener('input', (e) => {
@@ -1712,6 +1935,13 @@ document.getElementById('transaction-form').onsubmit = async (e) => {
         } else {
             state.transactions.push(transactionData);
         }
+
+        // Auto-Reactivate Settled Customer when new transaction is added (Directive 3.3)
+        const targetCust = state.customers.find(c => c.id === customerId);
+        if (targetCust && targetCust.isSettled) {
+            targetCust.isSettled = false;
+            delete targetCust.settlementDate;
+        }
         
         saveData();
 
@@ -1768,7 +1998,7 @@ document.getElementById('btn-whatsapp').onclick = () => {
     }
 
     const amt = formatCurrency(Math.abs(ledger.totalNet));
-    const msg = `Namaste ${customer.name},\n\nThis is a friendly reminder from Malwa Grain Merchants. Your current outstanding ledger balance is *${amt}*.\n\nPlease review and arrange for payment. Thank you!`;
+    const msg = `Namaste ${customer.name},\n\nThis is a friendly reminder from Mohit Store. Your current outstanding ledger balance is *${amt}*.\n\nPlease review and arrange for payment. Thank you!`;
     
     const waUrl = `https://wa.me/91${customer.phoneNumber || ''}?text=${encodeURIComponent(msg)}`;
     window.open(waUrl, '_blank');
@@ -1978,7 +2208,7 @@ if (btnPdfSummarized) {
 // Database JSON Backup Logic
 function downloadJsonBackup() {
     const fullBackup = {
-        appName: "Kirana Ledger Pro",
+        appName: "Mohit Store Ledger",
         exportedAt: new Date().toISOString(),
         version: "2.0.0",
         customers: state.customers || [],
@@ -3752,7 +3982,7 @@ function downloadBadDebtsPDF() {
     const doc = new jsPDF();
 
     doc.setFontSize(20);
-    doc.text("Malwa Grain Merchants", 14, 20);
+    doc.text("Mohit Store", 14, 20);
     doc.setFontSize(12);
     doc.text("Bad Debts & NPA Write-Off Summary Report", 14, 28);
     doc.setFontSize(10);
