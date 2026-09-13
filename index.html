@@ -134,10 +134,6 @@
         <main class="container">
             <section id="dashboard-view" class="view active tab-content">
                 <div class="header-actions">
-                    <div class="search-bar">
-                        <i class="ph ph-magnifying-glass"></i>
-                        <input type="text" id="search-input" placeholder="Search customers...">
-                    </div>
                     <button id="btn-backup-db" class="btn-outline">
                         <i class="ph ph-database"></i> Backup
                     </button>
@@ -147,28 +143,25 @@
                 </div>
                 
                 <div class="summary-cards" style="margin-bottom: 24px;">
-                    <div class="card highlight-danger">
+                    <div class="card card-principal">
                         <h3>Total Principal Outstanding</h3>
-                        <p id="dash-stat-principal" class="amount text-danger">₹0.00</p>
+                        <p id="dash-stat-principal" class="amount stat-principal-amount">₹0.00</p>
                     </div>
-                    <div class="card highlight-success">
+                    <div class="card card-interest">
                         <h3>Total Interest Accrued</h3>
-                        <p id="dash-stat-interest" class="amount text-danger">₹0.00</p>
+                        <p id="dash-stat-interest" class="amount stat-interest-amount">₹0.00</p>
                     </div>
-                    <div class="card highlight">
+                    <div class="card card-net">
                         <h3>Total Net Balance</h3>
-                        <p id="dash-stat-net" class="amount">₹0.00</p>
+                        <p id="dash-stat-net" class="amount stat-net-amount">₹0.00</p>
                     </div>
                 </div>
                 
-                <!-- Customer Tab Switcher (Directive 3) -->
-                <div class="customer-tabs-bar">
-                    <button type="button" class="cust-tab-btn active" id="tab-cust-active" data-customer-tab="active">
-                        <i class="ph ph-users"></i> Active Accounts (<span id="count-cust-active">0</span>)
-                    </button>
-                    <button type="button" class="cust-tab-btn" id="tab-cust-settled" data-customer-tab="settled">
-                        <i class="ph ph-check-circle"></i> Settled Accounts (<span id="count-cust-settled">0</span>)
-                    </button>
+                <div class="parties-list-header">
+                    <div class="search-bar">
+                        <i class="ph ph-magnifying-glass"></i>
+                        <input type="text" id="search-input" placeholder="Search customers by name or phone...">
+                    </div>
                 </div>
 
                 <div class="customer-list-container">
@@ -176,7 +169,6 @@
                         <thead>
                             <tr>
                                 <th>Name</th>
-                                <th>Status</th>
                                 <th class="text-right">Outstanding Balance</th>
                                 <th class="text-right">Actions</th>
                             </tr>
@@ -193,17 +185,17 @@
                     <p class="text-secondary">Aggregate data across all customer accounts.</p>
                 </div>
                 <div class="summary-cards">
-                    <div class="card highlight-danger">
+                    <div class="card card-principal">
                         <h3>Total Floating Capital (Market Debt)</h3>
-                        <p id="stat-floating" class="amount">₹0.00</p>
+                        <p id="stat-floating" class="amount stat-principal-amount">₹0.00</p>
                     </div>
-                    <div class="card highlight-success">
+                    <div class="card card-interest">
                         <h3>Total Expected Accrued Interest</h3>
-                        <p id="stat-accrued" class="amount">₹0.00</p>
+                        <p id="stat-accrued" class="amount stat-interest-amount">₹0.00</p>
                     </div>
-                    <div class="card">
+                    <div class="card card-net">
                         <h3>Total You Owe (Deposits)</h3>
-                        <p id="stat-deposits" class="amount">₹0.00</p>
+                        <p id="stat-deposits" class="amount stat-net-amount">₹0.00</p>
                     </div>
                 </div>
             </section>
@@ -612,17 +604,17 @@
                 </div>
 
                 <div class="summary-cards">
-                    <div class="card">
+                    <div class="card card-principal">
                         <h3>Current Principal</h3>
-                        <p id="summary-principal" class="amount">₹0.00</p>
+                        <p id="summary-principal" class="amount stat-principal-amount">₹0.00</p>
                     </div>
-                    <div class="card">
+                    <div class="card card-interest">
                         <h3>Accrued Interest</h3>
-                        <p id="summary-interest" class="amount text-danger">₹0.00</p>
+                        <p id="summary-interest" class="amount stat-interest-amount">₹0.00</p>
                     </div>
-                    <div class="card highlight">
+                    <div class="card card-net">
                         <h3>Total Net Balance</h3>
-                        <p id="summary-net" class="amount">₹0.00</p>
+                        <p id="summary-net" class="amount stat-net-amount">₹0.00</p>
                     </div>
                 </div>
 

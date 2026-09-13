@@ -477,6 +477,15 @@ function calculateLedger(customerId, asOfDateStr = null) {
             return (isNaN(dA) ? 0 : dA) - (isNaN(dB) ? 0 : dB);
         });
 
+    // Directive 1: Calculate rawPrincipal strictly as (Total Debits - Total Credits)
+    const totalDebits = txns
+        .filter(t => (t.type || '').toLowerCase() === 'debit')
+        .reduce((sum, t) => roundMoney(sum + (parseFloat(t.amount) || 0)), 0);
+    const totalCredits = txns
+        .filter(t => (t.type || '').toLowerCase() === 'credit')
+        .reduce((sum, t) => roundMoney(sum + (parseFloat(t.amount) || 0)), 0);
+    const rawPrincipal = roundMoney(totalDebits - totalCredits);
+
     let debitSilos = [];
     let excessCredit = 0;
     let computedLedgerRows = [];
@@ -492,7 +501,8 @@ function calculateLedger(customerId, asOfDateStr = null) {
 
         let totalAccrued = 0;
         const phases = getTxnInterestPhases(silo, defaultLendingRate, customer);
-        let currentPrincipal = silo.principalRemaining;
+        // Directive 1: Decouple math compounding base from display base
+        let compoundingBase = silo.principalRemaining;
         const siloStart = interestStart;
 
         for (let i = 0; i < phases.length; i++) {
@@ -519,7 +529,7 @@ function calculateLedger(customerId, asOfDateStr = null) {
             let phaseInterest = 0;
 
             if (phase.type === 'simple' && rateFrac > 0) {
-                phaseInterest = roundMoney(currentPrincipal * rateFrac * (days / 365));
+                phaseInterest = roundMoney(compoundingBase * rateFrac * (days / 365));
             } else if (phase.type === 'compound' && rateFrac > 0) {
                 let freqNum = 1;
                 let periodDays = 365;
@@ -553,18 +563,15 @@ function calculateLedger(customerId, asOfDateStr = null) {
                 const fullPeriods = Math.floor(days / periodDays);
                 const remainingDays = days - (fullPeriods * periodDays);
 
-                const amountAfterFull = currentPrincipal * Math.pow(1 + periodRate, fullPeriods);
+                const amountAfterFull = compoundingBase * Math.pow(1 + periodRate, fullPeriods);
                 const finalAmount = amountAfterFull + (amountAfterFull * periodRate * (remainingDays / periodDays));
-                phaseInterest = roundMoney(finalAmount - currentPrincipal);
+                phaseInterest = roundMoney(finalAmount - compoundingBase);
             }
 
             totalAccrued = roundMoney(totalAccrued + phaseInterest);
 
-            // Capitalize simple interest into principal when transitioning to compound phase
-            const nextPhase = phases[i + 1];
-            if (phase.type === 'simple' && nextPhase && nextPhase.type === 'compound') {
-                currentPrincipal = roundMoney(currentPrincipal + phaseInterest);
-            }
+            // Update compounding base for calculation across compounding periods / transitions
+            compoundingBase = roundMoney(compoundingBase + phaseInterest);
         }
 
         return totalAccrued;
@@ -743,9 +750,9 @@ function calculateLedger(customerId, asOfDateStr = null) {
     // Final Accrual up to As-Of Date
     updateAllSilosInterestUpTo(asOfDate);
 
-    let totalPrincipalRemaining = roundMoney(debitSilos.reduce((sum, s) => roundMoney(sum + s.principalRemaining), 0) - excessCredit);
     let totalAccruedInterest = roundMoney(debitSilos.reduce((sum, s) => roundMoney(sum + s.accruedInterest), 0));
-    const netOutstanding = roundMoney(totalPrincipalRemaining + totalAccruedInterest);
+    // Directive 1: Displayed Principal = rawPrincipal, Outstanding Balance = rawPrincipal + Displayed Interest
+    const netOutstanding = roundMoney(rawPrincipal + totalAccruedInterest);
 
     let status = 'active';
     if (netOutstanding > 0 && txns.length > 0) {
@@ -756,10 +763,11 @@ function calculateLedger(customerId, asOfDateStr = null) {
     }
 
     const result = {
+        rawPrincipal,
         netOutstanding,
-        totalPrincipalRemaining,
+        totalPrincipalRemaining: rawPrincipal,
         totalAccruedInterest,
-        principal: totalPrincipalRemaining,
+        principal: rawPrincipal,
         accruedInterest: totalAccruedInterest,
         totalNet: netOutstanding,
         isDebt: netOutstanding > 0,
@@ -780,32 +788,14 @@ function renderDashboard(searchTerm = '') {
     const tbody = document.getElementById('customer-list-body');
     if (!tbody) return;
     tbody.innerHTML = '';
-    
-    if (!state.currentCustomerTab) state.currentCustomerTab = 'active';
-
-    const activeCustomers = (state.customers || []).filter(c => !c.isSettled);
-    const settledCustomers = (state.customers || []).filter(c => c.isSettled);
-
-    // Update tab counters
-    const countActiveEl = document.getElementById('count-cust-active');
-    const countSettledEl = document.getElementById('count-cust-settled');
-    if (countActiveEl) countActiveEl.textContent = activeCustomers.length;
-    if (countSettledEl) countSettledEl.textContent = settledCustomers.length;
-
-    const currentDataset = state.currentCustomerTab === 'settled' ? settledCustomers : activeCustomers;
-
-    const filtered = currentDataset.filter(c => 
-        c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        (c.phoneNumber && c.phoneNumber.includes(searchTerm))
-    );
 
     let globalPrincipal = 0;
     let globalInterest = 0;
     let globalNet = 0;
 
-    activeCustomers.forEach(c => {
+    (state.customers || []).forEach(c => {
         const ledger = calculateLedger(c.id);
-        globalPrincipal = roundMoney(globalPrincipal + ledger.totalPrincipalRemaining);
+        globalPrincipal = roundMoney(globalPrincipal + ledger.rawPrincipal);
         globalInterest = roundMoney(globalInterest + ledger.totalAccruedInterest);
         globalNet = roundMoney(globalNet + ledger.netOutstanding);
     });
@@ -816,15 +806,17 @@ function renderDashboard(searchTerm = '') {
         document.getElementById('dash-stat-interest').textContent = formatCurrency(globalInterest);
         if (dashNetEl) {
             dashNetEl.textContent = formatCurrency(Math.abs(globalNet)) + (globalNet > 0 ? ' (Dr)' : (globalNet < 0 ? ' (Cr)' : ''));
-            dashNetEl.className = 'amount ' + (globalNet > 0 ? 'text-danger' : (globalNet < 0 ? 'text-success' : ''));
+            dashNetEl.className = 'amount stat-net-amount';
         }
     }
+
+    const filtered = (state.customers || []).filter(c => 
+        c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        (c.phoneNumber && c.phoneNumber.includes(searchTerm))
+    );
     
     if (!filtered || filtered.length === 0) {
-        const emptyMsg = state.currentCustomerTab === 'settled'
-            ? 'No settled accounts recorded yet.'
-            : "No active customers found. Click 'New Customer' to begin.";
-        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-secondary" style="padding: 2rem;">${emptyMsg}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="3" class="text-center text-secondary" style="padding: 2rem;">No customer accounts found. Click 'New Customer' to begin.</td></tr>`;
         return;
     }
 
@@ -834,15 +826,6 @@ function renderDashboard(searchTerm = '') {
         const ledger = calculateLedger(customer.id);
         const isCredit = ledger.totalNet < 0;
         const netClass = isCredit ? 'text-success' : (ledger.totalNet > 0 ? 'text-danger' : '');
-        
-        let statusBadge = `<span class="status-badge status-active">Active</span>`;
-        if (customer.isSettled) {
-            statusBadge = `<span class="status-badge status-settled"><i class="ph ph-check-circle"></i> Settled (${formatDate(customer.settlementDate)})</span>`;
-        } else if (ledger.status === 'overdue') {
-            statusBadge = `<span class="status-badge status-overdue">Overdue</span>`;
-        } else if (ledger.status === 'warning') {
-            statusBadge = `<span class="status-badge status-warning">Warning</span>`;
-        }
 
         const tr = document.createElement('tr');
         tr.onclick = () => openLedger(customer.id);
@@ -850,10 +833,9 @@ function renderDashboard(searchTerm = '') {
             <td>
                 <div class="customer-cell-flex">
                     <span class="customer-cell-name">${customer.name}</span>
-                    <span class="customer-cell-phone">${customer.phoneNumber || ''}</span>
+                    <span class="customer-cell-phone">${customer.phoneNumber ? '📱 ' + customer.phoneNumber : ''}</span>
                 </div>
             </td>
-            <td>${statusBadge}</td>
             <td class="text-right ${netClass}"><strong>${formatCurrency(Math.abs(ledger.totalNet))}</strong> ${ledger.totalNet < 0 ? '(Cr)' : (ledger.totalNet > 0 ? '(Dr)' : '')}</td>
             <td class="text-right">
                 <button class="btn-icon" onclick="event.stopPropagation(); editCustomer('${customer.id}')" title="Edit Customer">
@@ -967,8 +949,10 @@ function renderLedger() {
     const netAmt = Math.abs(ledger.netOutstanding);
     
     const netEl = document.getElementById('summary-net');
-    netEl.textContent = formatCurrency(netAmt) + (isCredit ? ' (Cr)' : (netAmt > 0 ? ' (Dr)' : ''));
-    netEl.className = 'amount ' + (isCredit ? 'text-success' : (netAmt > 0 ? 'text-danger' : ''));
+    if (netEl) {
+        netEl.textContent = formatCurrency(netAmt) + (isCredit ? ' (Cr)' : (netAmt > 0 ? ' (Dr)' : ''));
+        netEl.className = 'amount stat-net-amount';
+    }
 
     const listBody = document.getElementById('transaction-list-body');
     if (!listBody) return;
@@ -1205,20 +1189,7 @@ if (topBarThemeToggle) {
     };
 }
 
-// Sub-Tab Switchers for Active vs Settled Accounts (Directive 3)
-document.getElementById('tab-cust-active')?.addEventListener('click', () => {
-    state.currentCustomerTab = 'active';
-    document.getElementById('tab-cust-active')?.classList.add('active');
-    document.getElementById('tab-cust-settled')?.classList.remove('active');
-    renderDashboard(document.getElementById('search-input')?.value || '');
-});
 
-document.getElementById('tab-cust-settled')?.addEventListener('click', () => {
-    state.currentCustomerTab = 'settled';
-    document.getElementById('tab-cust-settled')?.classList.add('active');
-    document.getElementById('tab-cust-active')?.classList.remove('active');
-    renderDashboard(document.getElementById('search-input')?.value || '');
-});
 
 let searchDebounceTimer = null;
 document.getElementById('search-input').addEventListener('input', (e) => {

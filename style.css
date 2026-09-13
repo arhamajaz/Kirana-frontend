@@ -36,12 +36,12 @@
 }
 
 [data-theme="light"] {
-    --bg-color: #F8FAFC;          /* Soft Clean Slate */
-    --surface-color: #FFFFFF;     /* Pure White Surface */
+    --bg-color: #f8fafc;          /* Soft Minimalist Light Gray */
+    --surface-color: #ffffff;     /* Strict Pure White Surface */
     --surface-hover: #F1F5F9;
     --text-primary: #0F172A;      /* Deep Slate Black */
     --text-secondary: #64748B;    /* Soft Muted Gray */
-    --border-color: rgba(0, 0, 0, 0.07);
+    --border-color: #e5e7eb;      /* Crisp 1px Border */
     --border-focus: #2563EB;
     --debit-accent: #DC2626;      /* Rich Red */
     --debit-bg: rgba(220, 38, 38, 0.08);
@@ -53,9 +53,9 @@
     --primary-bg: rgba(37, 99, 235, 0.08);
     --wa-green: #25D366;
     --btn-primary-bg: #0F172A;
-    --btn-primary-text: #FFFFFF;
+    --btn-primary-text: #ffffff;
     --hover-overlay: rgba(15, 23, 42, 0.04);
-    --card-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.04), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
+    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
     --nav-shadow: 0 -4px 20px rgba(0, 0, 0, 0.06);
 }
 
@@ -188,6 +188,9 @@ h1, h2, h3, h4, h5, h6 {
     position: sticky;
     top: 0;
     z-index: 100;
+}
+[data-theme="dark"] .navbar {
+    border-bottom: 1px solid #374151; /* Directive 1: Crisp navbar bottom border */
 }
 .nav-brand { 
     display: flex; 
@@ -676,16 +679,25 @@ button {
 /* --- Header Actions --- */
 .header-actions { 
     display: flex; 
-    justify-content: space-between; 
-    margin-bottom: 28px; 
-    gap: 16px; 
+    justify-content: flex-end; 
+    margin-bottom: 24px; 
+    gap: 12px; 
     flex-wrap: wrap; 
+}
+.parties-list-header {
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+}
+.parties-list-header .search-bar {
+    width: 100%;
 }
 .search-bar { 
     display: flex; 
     align-items: center; 
     background: var(--surface-color); 
-    border: 1.5px solid var(--border-color); 
+    border: 1px solid var(--border-color); 
+    box-shadow: var(--card-shadow);
     border-radius: 12px; 
     padding: 0 16px; 
     flex: 1; 
@@ -694,7 +706,7 @@ button {
 }
 .search-bar:focus-within {
     border-color: var(--primary-accent);
-    box-shadow: 0 0 0 4px var(--primary-bg);
+    box-shadow: 0 0 0 3px var(--primary-bg);
 }
 .search-bar i {
     font-size: 1.2rem;
@@ -710,9 +722,8 @@ button {
     font-size: 0.95rem;
 }
 
-/* --- Tables & Horizontal Touch Scrolling --- */
+/* --- Tables & Mobile-First Card Row Spacing --- */
 .table-container,
-.customer-list-container,
 .transaction-list-container {
     background-color: var(--surface-color);
     border: 1px solid var(--border-color);
@@ -724,14 +735,91 @@ button {
     width: 100%;
 }
 
+.customer-list-container {
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-top: 8px;
+    width: 100%;
+}
+
 .data-table { 
     width: 100%; 
     border-collapse: collapse; 
 }
+
+#customer-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0 10px; /* Distinct 10px gap between customer rows */
+}
+
 .data-table th, .data-table td { 
     padding: 12px 14px; 
     border-bottom: 1px solid var(--border-color); 
     text-align: left; 
+}
+
+#customer-table th {
+    padding: 6px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+#customer-table tbody tr {
+    background-color: var(--surface-color);
+    box-shadow: var(--card-shadow);
+    border-radius: 12px;
+    transition: transform var(--transition-speed) ease, box-shadow var(--transition-speed) ease, border-color var(--transition-speed) ease, background-color var(--transition-speed) ease;
+    cursor: pointer;
+}
+
+#customer-table tbody tr td {
+    padding: 16px;
+    border-top: 1px solid #374151;
+    border-bottom: 1px solid #374151;
+    background-color: var(--surface-color);
+    transition: border-color var(--transition-speed) ease;
+}
+
+#customer-table tbody tr td:first-child {
+    border-left: 1px solid #374151;
+    border-top-left-radius: 12px;
+    border-bottom-left-radius: 12px;
+}
+
+#customer-table tbody tr td:last-child {
+    border-right: 1px solid #374151;
+    border-top-right-radius: 12px;
+    border-bottom-right-radius: 12px;
+}
+
+[data-theme="light"] #customer-table tbody tr td {
+    border-top-color: var(--border-color);
+    border-bottom-color: var(--border-color);
+}
+[data-theme="light"] #customer-table tbody tr td:first-child {
+    border-left-color: var(--border-color);
+}
+[data-theme="light"] #customer-table tbody tr td:last-child {
+    border-right-color: var(--border-color);
+}
+
+#customer-table tbody tr:hover {
+    transform: translateY(-1px);
+    background-color: var(--surface-hover);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+}
+
+#customer-table tbody tr:hover td {
+    border-color: #3b82f6 !important; /* Directive 3: Subtle blue outline on hover */
 }
 
 /* Stacked Mobile Customer Cell */
@@ -743,29 +831,11 @@ button {
 .customer-cell-name {
     font-weight: 600;
     font-size: 0.95rem;
-    color: var(--text-color);
+    color: var(--text-primary);
 }
 .customer-cell-phone {
     font-size: 0.78rem;
     color: var(--text-secondary);
-}
-.data-table th { 
-    color: var(--text-secondary); 
-    font-weight: 700; 
-    font-size: 0.8rem; 
-    text-transform: uppercase; 
-    letter-spacing: 0.05em; 
-    background-color: rgba(0, 0, 0, 0.02);
-}
-[data-theme="dark"] .data-table th {
-    background-color: rgba(255, 255, 255, 0.015);
-}
-.data-table tbody tr { 
-    transition: background-color var(--transition-speed) ease; 
-    cursor: pointer; 
-}
-.data-table tbody tr:hover { 
-    background-color: var(--hover-overlay); 
 }
 
 .badge {
@@ -846,6 +916,53 @@ button {
 .card.highlight { border-color: var(--primary-accent); }
 .card.highlight-danger { border-color: rgba(239, 68, 68, 0.4); background: var(--debit-bg); }
 .card.highlight-success { border-color: rgba(16, 185, 129, 0.4); background: var(--credit-bg); }
+
+/* --- Summary Cards Color Overhaul (Directive 2) --- */
+.card-principal {
+    border: 1.5px solid #3b82f6 !important; /* Cool Blue Border */
+    background: rgba(59, 130, 246, 0.05) !important;
+}
+.stat-principal-amount {
+    color: #60a5fa !important; /* Cool Blue Text */
+}
+
+.card-interest {
+    border: 1.5px solid #f97316 !important; /* Warm Orange Border */
+    background: rgba(249, 115, 22, 0.05) !important;
+}
+.stat-interest-amount {
+    color: #fb923c !important; /* Warm Orange Text */
+}
+
+.card-net {
+    border: 1.5px solid #8b5cf6 !important; /* Vibrant Purple Border */
+    background: rgba(139, 92, 246, 0.05) !important;
+}
+.stat-net-amount {
+    color: #a78bfa !important; /* Vibrant Purple Text */
+}
+
+[data-theme="light"] .card-principal {
+    border-color: #2563eb !important;
+    background: rgba(37, 99, 235, 0.04) !important;
+}
+[data-theme="light"] .stat-principal-amount {
+    color: #1d4ed8 !important;
+}
+[data-theme="light"] .card-interest {
+    border-color: #ea580c !important;
+    background: rgba(234, 88, 12, 0.04) !important;
+}
+[data-theme="light"] .stat-interest-amount {
+    color: #c2410c !important;
+}
+[data-theme="light"] .card-net {
+    border-color: #7c3aed !important;
+    background: rgba(124, 58, 237, 0.04) !important;
+}
+[data-theme="light"] .stat-net-amount {
+    color: #6d28d9 !important;
+}
 
 .ledger-actions { display: flex; justify-content: flex-end; margin-bottom: 20px; }
 
