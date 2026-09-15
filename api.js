@@ -63,23 +63,6 @@ function sanitizeAmount(val) {
     return Number(num.toFixed(2));
 }
 
-// --- SUPABASE CLIENT SETUP ---
-const SUPABASE_URL = window.ENV?.SUPABASE_URL || localStorage.getItem('ml_supabase_url') || "";
-const SUPABASE_ANON_KEY = window.ENV?.SUPABASE_ANON_KEY || localStorage.getItem('ml_supabase_key') || "";
-
-let supabase = null;
-if (window.supabase && typeof window.supabase.createClient === 'function' && SUPABASE_URL && SUPABASE_ANON_KEY) {
-    try {
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    } catch (e) {
-        console.warn("Supabase init skipped:", e);
-    }
-}
-
-function getSupabaseClient() {
-    return supabase;
-}
-
 // --- PRIVATE HELPERS ---
 function buildQuery(params) {
     if (!params || Object.keys(params).length === 0) {
@@ -95,16 +78,18 @@ function buildQuery(params) {
     return queryString ? `?${queryString}` : "";
 }
 
-function buildHeaders(authenticated = false) {
+/**
+ * Creates unified headers and automatically attaches Authorization: Bearer <token>
+ * pulling ml_pro_auth_token / ml_pro_jwt_token from localStorage.
+ */
+function buildHeaders(authenticated = true) {
     const headers = {
         "Content-Type": "application/json"
     };
 
-    if (authenticated) {
-        const token = getToken();
-        if (token) {
-            headers["Authorization"] = `Bearer ${token}`;
-        }
+    const token = getToken();
+    if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
     }
 
     return headers;
@@ -519,7 +504,6 @@ async function getReportSummary(type = "all") {
 
 // 9. Expose public API globally under a frozen object
 window.LedgerAPI = Object.freeze({
-    getSupabaseClient,
     setUnauthorizedHandler,
     login,
     loginUser,

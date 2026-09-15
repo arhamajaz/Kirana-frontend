@@ -246,12 +246,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
             try {
                 const loginRes = await LedgerAPI.loginUser(email, password);
-                if (loginRes && (loginRes.token || LedgerAPI.getToken())) {
+                // Drill down into backend response schema: response.data.token and response.data.user
+                const token = loginRes?.data?.token || loginRes?.token || LedgerAPI.getToken();
+                const user = loginRes?.data?.user || loginRes?.user;
+
+                if (token) {
                     state.isAuthenticated = true;
+                    if (user) {
+                        state.currentUser = user;
+                    }
                     document.getElementById('auth-view').classList.remove('active');
                     document.getElementById('auth-view').classList.add('hidden');
                     document.getElementById('app-wrapper').classList.remove('hidden');
                     switchView('dashboard-view');
+                    showDashboard();
                 } else {
                     throw new Error('Authentication failed: Invalid credentials.');
                 }
@@ -2464,10 +2472,13 @@ async function showDashboard() {
 
     try {
         const response = await LedgerAPI.getCustomers();
+        const customersList = Array.isArray(response) 
+            ? response 
+            : (Array.isArray(response?.customers) ? response.customers : (Array.isArray(response?.data?.customers) ? response.data.customers : (Array.isArray(response?.data) ? response.data : null)));
 
-        if (Array.isArray(response?.customers) && response.customers.length > 0) {
-            state.customers = [...response.customers];
-            state.pagination = response?.pagination || null;
+        if (Array.isArray(customersList) && customersList.length > 0) {
+            state.customers = [...customersList];
+            state.pagination = response?.pagination || response?.data?.pagination || null;
             saveData();
             renderDashboard();
         }
