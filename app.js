@@ -1981,36 +1981,110 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
         return;
     }
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const targetCustId = customerId || state.currentCustomerId;
     const customer = state.customers.find(c => c.id === targetCustId);
     if (!customer) return;
 
     const ledger = calculateLedger(targetCustId);
+    const rows = ledger.rows || [];
 
-    doc.setFontSize(18);
-    doc.text("STATEMENT OF ACCOUNT", 14, 20);
+    // Determine statement date range
+    let dateRangeStr = `As of ${formatDate(new Date())}`;
+    if (rows.length > 0) {
+        const validDates = rows.map(r => r.date ? new Date(r.date) : null).filter(d => d && !isNaN(d.getTime()));
+        if (validDates.length > 0) {
+            validDates.sort((a, b) => a - b);
+            const earliest = formatDate(validDates[0]);
+            const latest = formatDate(validDates[validDates.length - 1]);
+            dateRangeStr = `Period: ${earliest} to ${latest}`;
+        }
+    }
+
+    // --- PROMINENT HEADER SECTION ---
+    // Dark Top Header Bar (15, 23, 42)
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, 210, 26, 'F');
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.text("MOHIT STORE", 14, 13);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.text("MERCHANT LEDGER STATEMENT", 14, 20);
+
+    doc.setFontSize(8.5);
+    doc.text(mode === 'detailed' ? 'Detailed Itemized Statement' : 'Summary Statement', 196, 13, { align: 'right' });
+    doc.text(dateRangeStr, 196, 20, { align: 'right' });
+
+    // Customer & Financial Summary Box
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(14, 30, 182, 35, 3, 3, 'FD');
+
+    // Customer Info (Left)
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.setFont("helvetica", "bold");
+    doc.text("CUSTOMER INFORMATION", 18, 37);
+
     doc.setFontSize(11);
-    doc.text(`(${mode === 'detailed' ? 'Detailed Itemized Statement' : 'Summary Statement'})`, 14, 28);
-    
-    doc.setFontSize(10);
-    doc.text(`Customer Name: ${customer.name}`, 14, 40);
-    doc.text(`Phone: ${customer.phoneNumber || 'N/A'}`, 14, 45);
-    if (customer.address) doc.text(`Address: ${customer.address}`, 14, 50);
-    doc.text(`Generated On: ${formatDate(new Date())}`, 14, customer.address ? 55 : 50);
+    doc.setTextColor(15, 23, 42);
+    doc.setFont("helvetica", "bold");
+    doc.text(customer.name, 18, 43);
 
-    const startYHeader = customer.address ? 55 : 50;
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Phone: ${customer.phoneNumber || 'N/A'}`, 18, 49);
+    if (customer.address) {
+        doc.text(`Address: ${customer.address}`, 18, 54);
+        doc.text(`Account ID: ${customer.id}`, 18, 59);
+    } else {
+        doc.text(`Account ID: ${customer.id}`, 18, 54);
+    }
 
-    doc.text(`Net Balance: ${cleanCurrency(Math.abs(ledger.netOutstanding))} ${ledger.netOutstanding > 0 ? '(Dr - Customer Owes)' : '(Cr - Store Owes)'}`, 120, 40);
-    doc.text(`Principal Remaining: ${cleanCurrency(Math.abs(ledger.totalPrincipalRemaining))}`, 120, 45);
-    doc.text(`Total Accrued Interest: ${cleanCurrency(ledger.totalAccruedInterest)}`, 120, 50);
+    // Financial Overview Card (Right)
+    const isDebit = ledger.netOutstanding > 0;
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.setFont("helvetica", "bold");
+    doc.text("ACCOUNT BALANCE OVERVIEW", 115, 37);
 
+    doc.setFontSize(12);
+    if (isDebit) {
+        doc.setTextColor(220, 38, 38); // Crimson for debit
+    } else {
+        doc.setTextColor(5, 150, 105); // Emerald for credit
+    }
+    doc.setFont("helvetica", "bold");
+    const balStatus = isDebit ? '(Dr - Customer Owes)' : '(Cr - Store Owes)';
+    doc.text(`Net Outstanding: ${cleanCurrency(Math.abs(ledger.netOutstanding))} ${balStatus}`, 115, 44);
+
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Principal Remaining: ${cleanCurrency(Math.abs(ledger.totalPrincipalRemaining))}`, 115, 50);
+    doc.text(`Total Accrued Interest: ${cleanCurrency(ledger.totalAccruedInterest)}`, 115, 55);
+
+    // --- TABULAR LAYOUT CONFIGURATION ---
     let tableHead = [];
     let tableBody = [];
+    let colStyles = {};
 
     if (mode === 'summarized') {
         tableHead = [['Date', 'Remarks & Notes', 'Debit (-)', 'Credit (+)', 'Net Balance']];
-        tableBody = (ledger.rows || []).map(row => {
+        colStyles = {
+            0: { cellWidth: 26, halign: 'left' },
+            1: { cellWidth: 64, halign: 'left' },
+            2: { cellWidth: 30, halign: 'right' },
+            3: { cellWidth: 30, halign: 'right' },
+            4: { cellWidth: 32, halign: 'right' }
+        };
+
+        tableBody = rows.map(row => {
             const dateStr = formatDate(row.date);
             let remarks = (row.category ? `[${row.category}] ` : '') + (row.remarks || '');
             if (row.type === 'debit') {
@@ -2030,17 +2104,26 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
         });
 
         tableBody.push([
-            '', 
-            'TOTAL ACCRUED INTEREST', 
-            '', 
-            '', 
-            cleanCurrency(ledger.totalAccruedInterest)
+            'SUMMARY TOTAL', 
+            `Accrued Interest: ${cleanCurrency(ledger.totalAccruedInterest)}`, 
+            cleanCurrency(ledger.totalDebit || 0), 
+            cleanCurrency(ledger.totalCredit || 0), 
+            cleanCurrency(Math.abs(ledger.netOutstanding))
         ]);
     } else {
-        tableHead = [['Date', 'Remarks & Notes', 'Principal', 'Active Interest Rule', 'Elapsed Days', 'Accrued Interest']];
+        tableHead = [['Date', 'Remarks & Notes', 'Principal', 'Interest Rule', 'Days', 'Accrued Interest']];
+        colStyles = {
+            0: { cellWidth: 24, halign: 'left' },
+            1: { cellWidth: 50, halign: 'left' },
+            2: { cellWidth: 26, halign: 'right' },
+            3: { cellWidth: 32, halign: 'left' },
+            4: { cellWidth: 18, halign: 'center' },
+            5: { cellWidth: 32, halign: 'right' }
+        };
+
         const now = new Date();
 
-        tableBody = (ledger.rows || []).map(row => {
+        tableBody = rows.map(row => {
             const dateStr = formatDate(row.date);
             let remarks = (row.category ? `[${row.category}] ` : '') + (row.remarks || '');
 
@@ -2060,12 +2143,12 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
                 }
                 const silo = (ledger.silos || []).find(s => s.id === row.id || s.date === row.date);
                 const hasAdv = silo ? silo.hasAdvancePeriod : false;
-                interestRuleStr = `${iType}${freqStr} ${iRate}%${hasAdv ? ' (0% on Advance)' : ''}`;
+                interestRuleStr = `${iType}${freqStr} ${iRate}%${hasAdv ? ' (0% Adv)' : ''}`;
 
                 const startDate = row.interestStartDate ? new Date(row.interestStartDate) : (row.date ? new Date(row.date) : now);
                 const diffTime = Math.max(0, now - startDate);
                 const elapsedDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-                elapsedDaysStr = `${elapsedDays} days`;
+                elapsedDaysStr = `${elapsedDays} d`;
 
                 const accrued = silo ? silo.accruedInterest : (row.runningInterest || 0);
                 accruedInterestStr = cleanCurrency(accrued);
@@ -2080,19 +2163,47 @@ function downloadLedgerPDF(customerId, mode = 'detailed') {
 
             return [dateStr, remarks, principalStr, interestRuleStr, elapsedDaysStr, accruedInterestStr];
         });
+
+        tableBody.push([
+            'LEDGER TOTALS',
+            `Net Balance: ${cleanCurrency(Math.abs(ledger.netOutstanding))}`,
+            cleanCurrency(Math.abs(ledger.totalPrincipalRemaining)),
+            '-',
+            '-',
+            cleanCurrency(ledger.totalAccruedInterest)
+        ]);
     }
 
     doc.autoTable({
-        startY: startYHeader + 10,
+        startY: 70,
         head: tableHead,
         body: tableBody,
         theme: 'striped',
-        headStyles: { fillColor: [17, 24, 39] }
+        styles: {
+            font: 'helvetica',
+            fontSize: 8.5,
+            cellPadding: 3.5,
+            overflow: 'linebreak',
+            textColor: [30, 41, 59],
+            lineColor: [226, 232, 240],
+            lineWidth: 0.1
+        },
+        headStyles: {
+            fillColor: [15, 23, 42],
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            fontSize: 9,
+            cellPadding: 4.5
+        },
+        alternateRowStyles: {
+            fillColor: [248, 250, 252]
+        },
+        columnStyles: colStyles
     });
 
     if (ledger.hasAdvancePeriod || (ledger.advanceLog || []).length > 0) {
-        const finalY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 10 : 200;
-        doc.setFontSize(8.5);
+        const finalY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 8 : 200;
+        doc.setFontSize(8);
         doc.setTextColor(180, 83, 9);
         doc.text("* Note: Interest accrual was automatically paused (0% rate) during periods when running balance was in Advance/Credit state.", 14, finalY);
     }
@@ -2106,12 +2217,17 @@ function downloadCustomerListPDF() {
         return;
     }
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
 
-    doc.setFontSize(18);
-    doc.text("CUSTOMER OUTSTANDING SUMMARY REPORT", 14, 20);
-    doc.setFontSize(10);
-    doc.text(`Generated On: ${formatDate(new Date())}`, 14, 28);
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, 210, 24, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("CUSTOMER OUTSTANDING SUMMARY REPORT", 14, 13);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.text(`Generated On: ${formatDate(new Date())}`, 196, 13, { align: 'right' });
 
     let grandPrincipal = 0;
     let grandInterest = 0;
@@ -2129,12 +2245,12 @@ function downloadCustomerListPDF() {
             cleanCurrency(ledger.totalPrincipalRemaining),
             cleanCurrency(ledger.totalAccruedInterest),
             cleanCurrency(Math.abs(ledger.netOutstanding)) + (ledger.netOutstanding > 0 ? ' (Dr)' : (ledger.netOutstanding < 0 ? ' (Cr)' : '')),
-            ledger.status.toUpperCase()
+            ledger.status ? ledger.status.toUpperCase() : 'ACTIVE'
         ];
     });
 
     tableBody.push([
-        'TOTALS',
+        'GRAND TOTALS',
         '-',
         cleanCurrency(grandPrincipal),
         cleanCurrency(grandInterest),
@@ -2143,11 +2259,35 @@ function downloadCustomerListPDF() {
     ]);
 
     doc.autoTable({
-        startY: 36,
+        startY: 30,
         head: [['Customer Name', 'Phone', 'Principal Remaining', 'Accrued Interest', 'Net Outstanding', 'Status']],
         body: tableBody,
-        theme: 'grid',
-        headStyles: { fillColor: [17, 24, 39] }
+        theme: 'striped',
+        styles: {
+            font: 'helvetica',
+            fontSize: 8.5,
+            cellPadding: 3.5,
+            overflow: 'linebreak',
+            textColor: [30, 41, 59]
+        },
+        headStyles: {
+            fillColor: [15, 23, 42],
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            fontSize: 9,
+            cellPadding: 4.5
+        },
+        alternateRowStyles: {
+            fillColor: [248, 250, 252]
+        },
+        columnStyles: {
+            0: { cellWidth: 40 },
+            1: { cellWidth: 30 },
+            2: { cellWidth: 30, halign: 'right' },
+            3: { cellWidth: 30, halign: 'right' },
+            4: { cellWidth: 32, halign: 'right' },
+            5: { cellWidth: 20, halign: 'center' }
+        }
     });
 
     doc.save(`Customer_Summary_Report_${new Date().getTime()}.pdf`);
@@ -2176,41 +2316,145 @@ if (btnPdfSummarized) {
     };
 }
 
-// Database JSON Backup Logic
-function downloadJsonBackup() {
-    const fullBackup = {
-        appName: "Mohit Store Ledger",
-        exportedAt: new Date().toISOString(),
-        version: "2.0.0",
-        customers: state.customers || [],
-        transactions: state.transactions || [],
-        badDebts: state.badDebts || [],
-        cashbook: state.cashbook || [],
-        items: state.items || [],
-        bills: state.bills || [],
-        insurance: state.insurance || {}
+// Database Excel (.xlsx) Backup Logic (Directive 1)
+function downloadExcelBackup() {
+    if (!window.XLSX) {
+        alert("Excel generator library (SheetJS) is loading. Please try again in a moment.");
+        return;
+    }
+
+    const customersData = (state.customers || []).map(cust => {
+        const ledger = calculateLedger(cust.id);
+        const lRate = cust.lendingRate !== undefined && cust.lendingRate !== null ? parseFloat(cust.lendingRate) : 12;
+        const dRate = cust.depositRate !== undefined && cust.depositRate !== null ? parseFloat(cust.depositRate) : 6;
+        const principalRem = ledger ? roundMoney(ledger.totalPrincipalRemaining || 0) : 0;
+        const accruedInt = ledger ? roundMoney(ledger.totalAccruedInterest || 0) : 0;
+        const netBal = ledger ? roundMoney(ledger.netOutstanding || 0) : 0;
+
+        return {
+            "Customer ID": cust.id || '',
+            "Customer Name": cust.name || '',
+            "Phone Number": cust.phoneNumber || '',
+            "Address": cust.address || '',
+            "Default Interest Type": cust.defaultInterestType || 'SIMPLE',
+            "Lending Rate (%)": Number(lRate),
+            "Deposit Rate (%)": Number(dRate),
+            "Total Principal Remaining": Number(principalRem),
+            "Total Accrued Interest": Number(accruedInt),
+            "Net Balance": Number(netBal),
+            "Status": cust.isBadDebt ? "NPA / Bad Debt" : "Active"
+        };
+    });
+
+    const transactionsData = (state.transactions || []).map(txn => {
+        const customer = (state.customers || []).find(c => c.id === txn.customerId);
+        const amt = parseFloat(txn.amount) || 0;
+        const rate = txn.interestRate !== undefined && txn.interestRate !== null ? parseFloat(txn.interestRate) : (customer?.lendingRate || 12);
+        const runningP = parseFloat(txn.runningPrincipal) || 0;
+        const totNet = parseFloat(txn.totalNet) || 0;
+
+        return {
+            "Transaction ID": txn.id || '',
+            "Date": txn.date ? new Date(txn.date).toISOString().split('T')[0] : '',
+            "Customer ID": txn.customerId || '',
+            "Customer Name": customer ? customer.name : 'Unknown',
+            "Type": (txn.type || '').toUpperCase(),
+            "Category": txn.category || '',
+            "Remarks": txn.remarks || '',
+            "Amount": Number(roundMoney(amt)),
+            "Interest Rate (%)": Number(rate),
+            "Interest Type": txn.interestType || 'SIMPLE',
+            "Interest Start Date": txn.interestStartDate ? new Date(txn.interestStartDate).toISOString().split('T')[0] : '',
+            "Compounding Frequency": txn.compoundingFrequency || 'N/A',
+            "Running Principal": Number(roundMoney(runningP)),
+            "Total Net": Number(roundMoney(totNet)),
+            "Status": txn.isVoid ? "Voided" : (txn.isBadDebt ? "NPA / Bad Debt" : "Active")
+        };
+    });
+
+    let totalPortfolioPrincipal = 0;
+    let totalPortfolioInterest = 0;
+    let totalPortfolioNet = 0;
+
+    (state.customers || []).forEach(cust => {
+        const ledger = calculateLedger(cust.id);
+        if (ledger) {
+            totalPortfolioPrincipal += (ledger.totalPrincipalRemaining || 0);
+            totalPortfolioInterest += (ledger.totalAccruedInterest || 0);
+            totalPortfolioNet += (ledger.netOutstanding || 0);
+        }
+    });
+
+    let cashbookInflow = 0;
+    let cashbookOutflow = 0;
+    (state.cashbook || []).filter(c => !c.isVoid).forEach(entry => {
+        const amt = parseFloat(entry.amount) || 0;
+        if ((entry.type || '').toLowerCase() === 'in' || (entry.type || '').toLowerCase() === 'income') {
+            cashbookInflow += amt;
+        } else {
+            cashbookOutflow += amt;
+        }
+    });
+
+    let totalBadDebts = 0;
+    (state.badDebts || []).forEach(bd => {
+        totalBadDebts += (parseFloat(bd.unpaidAmount || bd.amount) || 0);
+    });
+
+    const summaryData = [
+        { "Metric": "Export Timestamp", "Value": new Date().toLocaleString(), "Category": "System Metadata" },
+        { "Metric": "System Version", "Value": "2.0.0", "Category": "System Metadata" },
+        { "Metric": "Total Customers", "Value": Number(state.customers ? state.customers.length : 0), "Category": "Customer Statistics" },
+        { "Metric": "Total Transactions", "Value": Number(state.transactions ? state.transactions.length : 0), "Category": "Transaction Statistics" },
+        { "Metric": "Total Portfolio Principal", "Value": Number(roundMoney(totalPortfolioPrincipal)), "Category": "Financial Tally" },
+        { "Metric": "Total Accrued Interest", "Value": Number(roundMoney(totalPortfolioInterest)), "Category": "Financial Tally" },
+        { "Metric": "Total Net Outstanding Balance", "Value": Number(roundMoney(totalPortfolioNet)), "Category": "Financial Tally" },
+        { "Metric": "Cashbook Total Inflow", "Value": Number(roundMoney(cashbookInflow)), "Category": "Cashbook Statistics" },
+        { "Metric": "Cashbook Total Outflow", "Value": Number(roundMoney(cashbookOutflow)), "Category": "Cashbook Statistics" },
+        { "Metric": "Cashbook Net Cash in Hand", "Value": Number(roundMoney(cashbookInflow - cashbookOutflow)), "Category": "Cashbook Statistics" },
+        { "Metric": "Total NPA / Bad Debts Tally", "Value": Number(roundMoney(totalBadDebts)), "Category": "Bad Debts / NPA" },
+        { "Metric": "Total Inventory Items", "Value": Number(state.items ? state.items.length : 0), "Category": "Store Inventory" },
+        { "Metric": "Total Generated Bills", "Value": Number(state.bills ? state.bills.length : 0), "Category": "Store Billing" }
+    ];
+
+    const wsCustomers = XLSX.utils.json_to_sheet(customersData.length > 0 ? customersData : [{}]);
+    const wsTransactions = XLSX.utils.json_to_sheet(transactionsData.length > 0 ? transactionsData : [{}]);
+    const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+
+    const autoFitCols = (data, ws) => {
+        if (!data || data.length === 0) return;
+        const keys = Object.keys(data[0] || {});
+        const colWidths = keys.map(key => {
+            let maxLen = key.toString().length;
+            data.forEach(row => {
+                const val = row[key];
+                if (val !== undefined && val !== null) {
+                    const len = val.toString().length;
+                    if (len > maxLen) maxLen = len;
+                }
+            });
+            return { wch: Math.min(Math.max(maxLen + 3, 12), 50) };
+        });
+        ws['!cols'] = colWidths;
     };
-    const dataStr = JSON.stringify(fullBackup, null, 2);
-    const blob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    
-    const a = document.createElement('a');
-    a.href = url;
+
+    autoFitCols(customersData, wsCustomers);
+    autoFitCols(transactionsData, wsTransactions);
+    autoFitCols(summaryData, wsSummary);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsCustomers, "Customers");
+    XLSX.utils.book_append_sheet(wb, wsTransactions, "Transactions");
+    XLSX.utils.book_append_sheet(wb, wsSummary, "Summary Data");
+
     const dateStr = new Date().toISOString().split('T')[0];
-    a.download = `Kirana_Ledger_Complete_Backup_${dateStr}.json`;
-    document.body.appendChild(a);
-    a.click();
-    
-    setTimeout(() => {
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-    }, 0);
+    XLSX.writeFile(wb, `Kirana_Ledger_Complete_Backup_${dateStr}.xlsx`);
 }
 
 const btnBackupDb = document.getElementById('btn-backup-db');
 if (btnBackupDb) {
     btnBackupDb.onclick = () => {
-        downloadJsonBackup();
+        downloadExcelBackup();
     };
 }
 
