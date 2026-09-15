@@ -8,7 +8,7 @@
 
 // 1. Dynamic BASE_URL configuration
 const API = Object.freeze({
-    BASE_URL: window.ENV?.API_BASE_URL || "http://localhost:3000/api/v1"
+    BASE_URL: window.ENV?.API_BASE_URL || "https://kirana-backend-9t5z.onrender.com/api/v1"
 });
 
 const TOKEN_KEY = "ml_pro_auth_token";
@@ -188,23 +188,6 @@ async function loginUser(email, password) {
     const cleanEmail = email ? String(email).trim().toLowerCase() : "";
     const cleanPwd = password ? String(password) : "";
 
-    if (supabase) {
-        try {
-            const { data, error } = await supabase.auth.signInWithPassword({
-                email: cleanEmail,
-                password: cleanPwd
-            });
-            if (error) throw error;
-            if (data?.session) {
-                saveToken(data.session.access_token);
-                return { token: data.session.access_token, user: data.user };
-            }
-        } catch (supaErr) {
-            console.error("Supabase login error:", supaErr);
-            throw supaErr;
-        }
-    }
-
     try {
         const res = await request("POST", "/auth/login", { 
             email: cleanEmail, 
@@ -231,36 +214,6 @@ async function registerUser(email, password, name = "", businessName = "") {
     const cleanPwd = password ? String(password) : "";
     const cleanName = name ? String(name).trim() : "";
     const cleanShop = businessName ? String(businessName).trim() : "";
-
-    if (supabase) {
-        try {
-            const { data, error } = await supabase.auth.signUp({
-                email: cleanEmail,
-                password: cleanPwd,
-                options: {
-                    data: { full_name: cleanName, shop_name: cleanShop }
-                }
-            });
-            if (error) throw error;
-            if (data?.session) {
-                saveToken(data.session.access_token);
-            }
-            if (data?.user) {
-                await supabase.from('merchants').upsert({
-                    id: data.user.id,
-                    name: cleanName || 'Merchant',
-                    email: cleanEmail,
-                    shop_name: cleanShop || 'Malwa Grain Merchants'
-                }).catch(err => console.warn("Supabase merchant record upsert warning:", err));
-            }
-            const token = data?.session?.access_token || "mock_token_" + Date.now();
-            saveToken(token);
-            return { token, user: data?.user || { email: cleanEmail } };
-        } catch (supaErr) {
-            console.error("Supabase sign-up error:", supaErr);
-            throw supaErr;
-        }
-    }
 
     try {
         const res = await request("POST", "/auth/register", {
@@ -373,12 +326,32 @@ async function createTransaction(transactionData) {
     return request("POST", "/transactions", payload, true);
 }
 
+async function getCustomerById(id) {
+    return request("GET", `/customers/${id}`, null, true);
+}
+
 async function getCustomerLedger(customerId, params) {
     return request("GET", `/customers/${customerId}/ledger${buildQuery(params)}`, null, true);
 }
 
 async function getCustomerTransactions(customerId, params) {
     return request("GET", `/customers/${customerId}/transactions${buildQuery(params)}`, null, true);
+}
+
+async function getTransactions(params) {
+    return request("GET", `/transactions${buildQuery(params)}`, null, true);
+}
+
+async function getTransactionById(id) {
+    return request("GET", `/transactions/${id}`, null, true);
+}
+
+async function deleteTransaction(id) {
+    return request("DELETE", `/transactions/${id}`, null, true);
+}
+
+async function getGlobalLedger(params) {
+    return request("GET", `/ledger${buildQuery(params)}`, null, true);
 }
 
 // Void transaction endpoint aligned to PATCH /transactions/:id/void
@@ -553,13 +526,20 @@ window.LedgerAPI = Object.freeze({
     register,
     registerUser,
     getCustomers,
+    getCustomerById,
     searchCustomers,
     createCustomer,
     updateCustomer,
     deleteCustomer,
+    getTransactions,
+    getTransactionById,
     createTransaction,
+    updateTransaction,
+    deleteTransaction,
+    voidTransaction,
     getCustomerLedger,
     getCustomerTransactions,
+    getGlobalLedger,
     getItems,
     createItem,
     updateItem,
@@ -573,8 +553,6 @@ window.LedgerAPI = Object.freeze({
     getInsurance,
     updateInsurance,
     getReportSummary,
-    voidTransaction,
-    updateTransaction,
     healthCheck,
     saveToken,
     getToken,
