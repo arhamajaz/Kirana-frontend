@@ -96,13 +96,16 @@ function buildHeaders(authenticated = true) {
 }
 
 /**
- * Reusable generic request helper.
+ * Reusable generic request helper with Timeout, Retries, 401 Interceptor, and Zod Error Parsing.
  */
-async function request(method, endpoint, body = null, authenticated = false) {
+async function request(method, endpoint, body = null, authenticated = false, retries = 2) {
     const isTestMode = localStorage.getItem('ml_pro_test_mode') === 'true';
     if (isTestMode || (authenticated && !getToken())) {
-        const err = new Error("Offline/Test Mode: Network calls isolated to localStorage.");
+        const err = new Error("Authentication required or test mode active.");
         err.isOffline = true;
+        if (authenticated && !getToken() && onUnauthorizedCallback) {
+            onUnauthorizedCallback();
+        }
         throw err;
     }
 
@@ -119,8 +122,19 @@ async function request(method, endpoint, body = null, authenticated = false) {
 
     let response;
     try {
+        // 20-second timeout controller for Render cold-starts
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
+        config.signal = controller.signal;
+
         response = await fetch(url, config);
+        clearTimeout(timeoutId);
     } catch (networkError) {
+        if (retries > 0) {
+            console.warn(`[API Interceptor] Retrying fetch (${retries} attempts remaining) for ${endpoint}...`);
+            await new Promise(res => setTimeout(res, 1500));
+            return request(method, endpoint, body, authenticated, retries - 1);
+        }
         console.error("Fetch Network Error:", networkError);
         const err = new Error("Network error: Please check if backend server is running at " + API.BASE_URL);
         err.isOffline = true;
@@ -143,14 +157,20 @@ async function request(method, endpoint, body = null, authenticated = false) {
         if (onUnauthorizedCallback) {
             onUnauthorizedCallback();
         }
+        const err = new Error("Session expired. Please log in again.");
+        err.status = 401;
+        throw err;
     }
 
     if (!response.ok) {
         let message = responseData && responseData.message;
-        
-        // Parse Zod structured errors if present
+
+        // Parse Zod structured errors recursively if present
         if (responseData && responseData.errors && Array.isArray(responseData.errors)) {
-            const detailMsgs = responseData.errors.map(err => err.message || err.path?.join('.')).join("; ");
+            const detailMsgs = responseData.errors
+                .map(err => err.message || (err.path ? `${err.path.join('.')}: invalid value` : null))
+                .filter(Boolean)
+                .join("; ");
             if (detailMsgs) message = `${message ? message + ": " : ""}${detailMsgs}`;
         }
 
@@ -164,6 +184,7 @@ async function request(method, endpoint, body = null, authenticated = false) {
         throw error;
     }
 
+    // Standardized response unwrapping
     return responseData && responseData.hasOwnProperty("data") ? responseData.data : responseData;
 }
 
@@ -281,12 +302,18 @@ async function deleteCustomer(id) {
 async function createTransaction(transactionData) {
     const type = String(transactionData.type).toUpperCase();
     
+    const rawDate = transactionData.date ? new Date(transactionData.date) : new Date();
+    const dateIso = !isNaN(rawDate.getTime()) ? rawDate.toISOString() : new Date().toISOString();
+
+    const rawInterestDate = transactionData.interestStartDate ? new Date(transactionData.interestStartDate) : rawDate;
+    const interestDateIso = !isNaN(rawInterestDate.getTime()) ? rawInterestDate.toISOString() : dateIso;
+
     const payload = {
         customerId: transactionData.customerId,
         type: type,
         amount: sanitizeAmount(transactionData.amount),
-        date: transactionData.date || new Date().toISOString(),
-        interestStartDate: transactionData.interestStartDate || transactionData.date || new Date().toISOString()
+        date: dateIso,
+        interestStartDate: interestDateIso
     };
 
     if (transactionData.remarks) {

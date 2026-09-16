@@ -34,6 +34,131 @@ if (typeof window !== 'undefined' && !window.LedgerAPI) {
     };
 }
 
+// --- GLOBAL UI STATE MANAGER (Directive 3) ---
+window.UIManager = (() => {
+    let loadingCount = 0;
+
+    function getOverlay() {
+        let overlay = document.getElementById('global-loading-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'global-loading-overlay';
+            overlay.className = 'loading-overlay-hidden';
+            overlay.innerHTML = `
+                <div class="spinner-container">
+                    <div class="loading-spinner"></div>
+                    <div class="loading-text" id="loading-overlay-text">Processing...</div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        }
+        return overlay;
+    }
+
+    function showLoading(message = "Processing...") {
+        loadingCount++;
+        const overlay = getOverlay();
+        const textEl = document.getElementById('loading-overlay-text');
+        if (textEl) textEl.textContent = message;
+        overlay.classList.remove('loading-overlay-hidden');
+        overlay.classList.add('loading-overlay-visible');
+    }
+
+    function hideLoading() {
+        loadingCount = Math.max(0, loadingCount - 1);
+        if (loadingCount === 0) {
+            const overlay = getOverlay();
+            overlay.classList.remove('loading-overlay-visible');
+            overlay.classList.add('loading-overlay-hidden');
+        }
+    }
+
+    function showErrorModal(title, message) {
+        let modal = document.getElementById('global-error-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'global-error-modal';
+            modal.className = 'modal-backdrop';
+            modal.style.display = 'none';
+            modal.innerHTML = `
+                <div class="modal-card">
+                    <div class="modal-header alert-header">
+                        <h3 id="global-error-title">Error</h3>
+                        <button class="close-btn" onclick="UIManager.closeErrorModal()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p id="global-error-message"></p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-primary" onclick="UIManager.closeErrorModal()">OK</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        const titleEl = document.getElementById('global-error-title');
+        const msgEl = document.getElementById('global-error-message');
+        if (titleEl) titleEl.textContent = title || "Action Failed";
+        if (msgEl) msgEl.textContent = message || "An unexpected error occurred.";
+        modal.style.display = 'flex';
+    }
+
+    function closeErrorModal() {
+        const modal = document.getElementById('global-error-modal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    function showToast(message, type = 'info') {
+        let toastContainer = document.getElementById('toast-container');
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.id = 'toast-container';
+            document.body.appendChild(toastContainer);
+        }
+
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+        toastContainer.appendChild(toast);
+
+        setTimeout(() => {
+            toast.classList.add('toast-fade-out');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    /**
+     * Higher-order wrapper for async operations with loading spinner, error modal, and state auto-sync.
+     */
+    async function runAsync(asyncFn, loadingMessage = "Updating ledger...", successMessage = null, syncCallback = null) {
+        showLoading(loadingMessage);
+        try {
+            const result = await asyncFn();
+            if (successMessage) showToast(successMessage, 'success');
+            if (typeof syncCallback === 'function') {
+                await syncCallback();
+            }
+            return result;
+        } catch (error) {
+            console.error("[UIManager] Async operation failed:", error);
+            showErrorModal("Operation Failed", error.message || "An unexpected error occurred.");
+            throw error;
+        } finally {
+            hideLoading();
+        }
+    }
+
+    return {
+        showLoading,
+        hideLoading,
+        showErrorModal,
+        closeErrorModal,
+        showToast,
+        runAsync
+    };
+})();
+
 // --- STATE MANAGEMENT ---
 let state = {
     isAuthenticated: false,
@@ -1088,7 +1213,7 @@ function updateSettlementCalculations() {
 
 document.getElementById('settle-discount-input')?.addEventListener('input', updateSettlementCalculations);
 
-document.getElementById('settlement-form')?.addEventListener('submit', (e) => {
+document.getElementById('settlement-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const customerId = document.getElementById('settle-customer-id').value;
     const settleDateInput = document.getElementById('settle-date-input').value;
@@ -1098,73 +1223,98 @@ document.getElementById('settlement-form')?.addEventListener('submit', (e) => {
     const customer = state.customers.find(c => c.id === customerId);
     if (!customer) return;
 
-    const settleDate = new Date(settleDateInput).toISOString();
-    const ledger = calculateLedger(customerId, settleDateInput);
-    const grossOutstanding = ledger.netOutstanding;
+    await UIManager.runAsync(async () => {
+        const settleDate = new Date(settleDateInput).toISOString();
+        const ledger = calculateLedger(customerId, settleDateInput);
+        const grossOutstanding = ledger.netOutstanding;
 
-    // 1. Process Discount/Waiver if present
-    if (discount > 0) {
-        const waiverTxn = {
-            id: `txn_waiver_${Date.now()}`,
-            customerId,
-            date: settleDate,
-            interestStartDate: settleDate,
-            type: 'waiver',
-            category: 'Settlement Waiver',
-            amount: discount,
-            remarks: `Settlement Interest Waiver / Discount`,
-            isVoid: false,
-            createdAt: new Date().toISOString()
-        };
-        state.transactions.push(waiverTxn);
-    }
+        // 1. Process Discount/Waiver if present
+        if (discount > 0) {
+            const waiverTxn = {
+                id: `txn_waiver_${Date.now()}`,
+                customerId,
+                date: settleDate,
+                interestStartDate: settleDate,
+                type: 'waiver',
+                category: 'Settlement Waiver',
+                amount: discount,
+                remarks: `Settlement Interest Waiver / Discount`,
+                isVoid: false,
+                createdAt: new Date().toISOString()
+            };
+            state.transactions.push(waiverTxn);
+            if (!state.isTestMode && LedgerAPI.getToken()) {
+                await LedgerAPI.createTransaction({
+                    customerId,
+                    type: 'CREDIT',
+                    amount: discount,
+                    date: settleDate,
+                    interestStartDate: settleDate,
+                    remarks: `Settlement Interest Waiver / Discount`
+                });
+            }
+        }
 
-    // 2. Process Final Zero-Out Transaction
-    const remainingToZero = roundMoney(grossOutstanding - discount);
-    if (remainingToZero > 0) {
-        // Customer owes merchant -> Credit transaction brings balance to 0
-        const zeroTxn = {
-            id: `txn_settle_${Date.now()}`,
-            customerId,
-            date: settleDate,
-            interestStartDate: settleDate,
-            type: 'credit',
-            category: 'Settlement',
-            amount: remainingToZero,
-            remarks: `Full Account Settlement Payment`,
-            isVoid: false,
-            createdAt: new Date().toISOString()
-        };
-        state.transactions.push(zeroTxn);
-    } else if (grossOutstanding < 0) {
-        // Merchant owed credit to customer -> Debit transaction brings balance to 0
-        const refundAmt = Math.abs(grossOutstanding);
-        const zeroTxn = {
-            id: `txn_settle_${Date.now()}`,
-            customerId,
-            date: settleDate,
-            interestStartDate: settleDate,
-            type: 'debit',
-            category: 'Settlement',
-            amount: refundAmt,
-            remarks: `Account Settlement Credit Refund`,
-            isVoid: false,
-            createdAt: new Date().toISOString()
-        };
-        state.transactions.push(zeroTxn);
-    }
+        // 2. Process Final Zero-Out Transaction
+        const remainingToZero = roundMoney(grossOutstanding - discount);
+        if (remainingToZero > 0) {
+            const zeroTxn = {
+                id: `txn_settle_${Date.now()}`,
+                customerId,
+                date: settleDate,
+                interestStartDate: settleDate,
+                type: 'credit',
+                category: 'Settlement',
+                amount: remainingToZero,
+                remarks: `Full Account Settlement Payment`,
+                isVoid: false,
+                createdAt: new Date().toISOString()
+            };
+            state.transactions.push(zeroTxn);
+            if (!state.isTestMode && LedgerAPI.getToken()) {
+                await LedgerAPI.createTransaction({
+                    customerId,
+                    type: 'CREDIT',
+                    amount: remainingToZero,
+                    date: settleDate,
+                    interestStartDate: settleDate,
+                    remarks: `Full Account Settlement Payment`
+                });
+            }
+        } else if (grossOutstanding < 0) {
+            const refundAmt = Math.abs(grossOutstanding);
+            const zeroTxn = {
+                id: `txn_settle_${Date.now()}`,
+                customerId,
+                date: settleDate,
+                interestStartDate: settleDate,
+                type: 'debit',
+                category: 'Settlement',
+                amount: refundAmt,
+                remarks: `Account Settlement Credit Refund`,
+                isVoid: false,
+                createdAt: new Date().toISOString()
+            };
+            state.transactions.push(zeroTxn);
+            if (!state.isTestMode && LedgerAPI.getToken()) {
+                await LedgerAPI.createTransaction({
+                    customerId,
+                    type: 'DEBIT',
+                    amount: refundAmt,
+                    date: settleDate,
+                    interestStartDate: settleDate,
+                    remarks: `Account Settlement Credit Refund`
+                });
+            }
+        }
 
-    // 3. Update Customer Profile State as Settled
-    customer.isSettled = true;
-    customer.settlementDate = settleDate;
+        // 3. Update Customer Profile State as Settled
+        customer.isSettled = true;
+        customer.settlementDate = settleDate;
 
-    saveData();
-    toggleModal('settlement-modal', false);
-
-    if (state.currentCustomerId === customerId) {
-        renderLedger();
-    }
-    renderDashboard();
+        saveData();
+        toggleModal('settlement-modal', false);
+    }, "Processing settlement...", "Account settled successfully!", syncStateFromBackend);
 });
 
 document.getElementById('btn-settle-account')?.addEventListener('click', () => {
@@ -1277,7 +1427,7 @@ document.getElementById('cust-interest-type')?.addEventListener('change', (e) =>
     }
 });
 
-document.getElementById('btn-delete-customer-modal')?.addEventListener('click', () => {
+document.getElementById('btn-delete-customer-modal')?.addEventListener('click', async () => {
     const custId = document.getElementById('cust-id').value;
     if (!custId) return;
 
@@ -1285,153 +1435,101 @@ document.getElementById('btn-delete-customer-modal')?.addEventListener('click', 
     const name = customer ? customer.name : 'this customer';
 
     if (confirm(`Are you sure you want to delete ${name}? This will permanently remove all associated transactions and ledger records.`)) {
-        state.customers = (state.customers || []).filter(c => c.id !== custId);
-        state.transactions = (state.transactions || []).filter(t => t.customerId !== custId);
-        saveData();
-        toggleModal('customer-modal', false);
-        showDashboard();
-        renderDashboard();
+        await UIManager.runAsync(async () => {
+            state.customers = (state.customers || []).filter(c => c.id !== custId);
+            state.transactions = (state.transactions || []).filter(t => t.customerId !== custId);
+            saveData();
+            if (!state.isTestMode && LedgerAPI.getToken()) {
+                await LedgerAPI.deleteCustomer(custId);
+            }
+            toggleModal('customer-modal', false);
+            showDashboard();
+        }, "Deleting customer...", "Customer deleted successfully!", syncStateFromBackend);
     }
 });
+
+async function syncStateFromBackend() {
+    if (!state.isAuthenticated || !LedgerAPI.getToken()) return;
+    try {
+        const custRes = await LedgerAPI.getCustomers();
+        if (Array.isArray(custRes)) {
+            state.customers = custRes;
+        } else if (custRes && Array.isArray(custRes.customers)) {
+            state.customers = custRes.customers;
+        }
+        
+        const txRes = await LedgerAPI.getTransactions();
+        if (Array.isArray(txRes)) {
+            state.transactions = txRes;
+        } else if (txRes && Array.isArray(txRes.transactions)) {
+            state.transactions = txRes.transactions;
+        }
+
+        saveData();
+        if (state.currentCustomerId) {
+            renderLedger();
+        }
+        renderDashboard();
+    } catch (err) {
+        console.warn("State auto-sync failed:", err);
+    }
+}
 
 document.getElementById('customer-form').onsubmit = async (e) => {
     e.preventDefault();
     const id = document.getElementById('cust-id').value;
+    const isEdit = Boolean(id);
 
-    if (id) {
-        const submitBtn = e.target.querySelector('button[type="submit"]');
-        const originalBtnText = submitBtn.textContent;
+    const name = document.getElementById('cust-name').value.trim();
+    const phoneNumber = document.getElementById('cust-phone').value.trim();
+    const address = document.getElementById('cust-address').value.trim();
+    const lendingRate = parseFloat(document.getElementById('cust-lend-rate').value);
+    const depositRate = parseFloat(document.getElementById('cust-dep-rate').value);
+    const defaultInterestType = document.getElementById('cust-interest-type')?.value || 'simple';
+    const compoundingFrequency = document.getElementById('cust-compound-freq')?.value || 'monthly';
 
-        let errorEl = document.getElementById('customer-form-error');
-        if (!errorEl) {
-            errorEl = document.createElement('div');
-            errorEl.id = 'customer-form-error';
-            errorEl.className = 'text-danger';
-            errorEl.style.marginBottom = '1rem';
-            errorEl.style.fontSize = '0.875rem';
-            errorEl.style.textAlign = 'center';
-            e.target.insertBefore(errorEl, e.target.firstChild);
-        }
-        errorEl.classList.add('hidden');
-        errorEl.textContent = '';
+    const customerData = {
+        name,
+        phoneNumber,
+        address,
+        lendingRate,
+        depositRate,
+        defaultInterestType,
+        compoundingFrequency
+    };
 
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Saving...';
+    const loadingMsg = isEdit ? "Updating customer..." : "Creating customer...";
+    const successMsg = isEdit ? "Customer updated successfully!" : "Customer created successfully!";
 
-        try {
-            const name = document.getElementById('cust-name').value.trim();
-            const phoneNumber = document.getElementById('cust-phone').value.trim();
-            const address = document.getElementById('cust-address').value.trim();
-            const lendingRate = parseFloat(document.getElementById('cust-lend-rate').value);
-            const depositRate = parseFloat(document.getElementById('cust-dep-rate').value);
-            const defaultInterestType = document.getElementById('cust-interest-type')?.value || 'simple';
-            const compoundingFrequency = document.getElementById('cust-compound-freq')?.value || 'monthly';
-
-            const customerData = {
-                name,
-                phoneNumber,
-                address,
-                lendingRate,
-                depositRate,
-                defaultInterestType,
-                compoundingFrequency
-            };
-
+    await UIManager.runAsync(async () => {
+        if (isEdit) {
             const idx = state.customers.findIndex(c => c.id === id);
             if (idx !== -1) {
                 state.customers[idx] = { ...state.customers[idx], ...customerData };
                 saveData();
             }
-
             if (!state.isTestMode && LedgerAPI.getToken()) {
-                try {
-                    await LedgerAPI.updateCustomer(id, customerData);
-                } catch (apiErr) {
-                    console.warn("Backend customer update sync failed, saved locally:", apiErr);
-                }
+                await LedgerAPI.updateCustomer(id, customerData);
             }
-
-            e.target.reset();
-            toggleModal('customer-modal', false);
-            renderDashboard();
-        } catch (err) {
-            console.error("Update customer failed:", err);
-            errorEl.textContent = err.message || 'Unable to update customer. Saved locally.';
-            errorEl.classList.remove('hidden');
-        } finally {
-            submitBtn.disabled = false;
-            submitBtn.textContent = originalBtnText;
-        }
-        return;
-    }
-
-    // --- CREATE CUSTOMER FLOW ---
-    const submitBtn = e.target.querySelector('button[type="submit"]');
-    const originalBtnText = submitBtn.textContent;
-
-    let errorEl = document.getElementById('customer-form-error');
-    if (!errorEl) {
-        errorEl = document.createElement('div');
-        errorEl.id = 'customer-form-error';
-        errorEl.className = 'text-danger';
-        errorEl.style.marginBottom = '1rem';
-        errorEl.style.fontSize = '0.875rem';
-        errorEl.style.textAlign = 'center';
-        e.target.insertBefore(errorEl, e.target.firstChild);
-    }
-    errorEl.classList.add('hidden');
-    errorEl.textContent = '';
-
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Creating...';
-
-    try {
-        const name = document.getElementById('cust-name').value.trim();
-        const phoneNumber = document.getElementById('cust-phone').value.trim();
-        const address = document.getElementById('cust-address').value.trim();
-        const lendingRate = parseFloat(document.getElementById('cust-lend-rate').value);
-        const depositRate = parseFloat(document.getElementById('cust-dep-rate').value);
-        const defaultInterestType = document.getElementById('cust-interest-type')?.value || 'simple';
-        const compoundingFrequency = document.getElementById('cust-compound-freq')?.value || 'monthly';
-
-        const customerData = {
-            id: 'cust-' + Date.now(),
-            name,
-            phoneNumber,
-            address,
-            lendingRate,
-            depositRate,
-            defaultInterestType,
-            compoundingFrequency,
-            createdAt: new Date().toISOString()
-        };
-
-        state.customers.push(customerData);
-        saveData();
-
-        if (!state.isTestMode && LedgerAPI.getToken()) {
-            try {
+        } else {
+            const newCust = {
+                id: 'cust-' + Date.now(),
+                ...customerData,
+                createdAt: new Date().toISOString()
+            };
+            state.customers.push(newCust);
+            saveData();
+            if (!state.isTestMode && LedgerAPI.getToken()) {
                 const res = await LedgerAPI.createCustomer(customerData);
                 if (res && res.id) {
-                    customerData.id = res.id;
+                    newCust.id = res.id;
                     saveData();
                 }
-            } catch (apiErr) {
-                console.warn("Backend customer creation sync failed, saved locally:", apiErr);
             }
         }
-
         e.target.reset();
         toggleModal('customer-modal', false);
-        renderDashboard();
-    } catch (err) {
-        console.error("Create customer failed:", err);
-        errorEl.textContent = err.message || 'Unable to create customer. Saved locally.';
-        errorEl.classList.remove('hidden');
-    } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = originalBtnText;
-    }
+    }, loadingMsg, successMsg, syncStateFromBackend);
 };
 
 // --- INTEREST SCHEDULE BUILDER ENGINE ---
@@ -1809,101 +1907,89 @@ function openTransactionDetailModal(txnId) {
 
 document.getElementById('transaction-form').onsubmit = async (e) => {
     e.preventDefault();
-    const submitBtn = e.target.querySelector('button[type="submit"]');
-    const originalBtnText = submitBtn.textContent;
+    const customerId = state.currentCustomerId;
+    const typeValue = document.getElementById('txn-type').value;
 
-    let errorEl = document.getElementById('transaction-form-error');
-    if (!errorEl) {
-        errorEl = document.createElement('div');
-        errorEl.id = 'transaction-form-error';
-        errorEl.className = 'text-danger';
-        errorEl.style.marginBottom = '1rem';
-        errorEl.style.fontSize = '0.875rem';
-        errorEl.style.textAlign = 'center';
-        e.target.insertBefore(errorEl, e.target.firstChild);
+    if (typeValue !== 'debit' && typeValue !== 'credit') {
+        UIManager.showErrorModal('Invalid Type', 'Transaction type must be Debit or Credit');
+        return;
     }
-    errorEl.classList.add('hidden');
-    errorEl.textContent = '';
 
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Committing...';
+    const amount = parseFloat(document.getElementById('txn-amount').value);
+    const dateInput = document.getElementById('txn-date').value;
+    const interestStartDateInput = document.getElementById('txn-interest-start-date')?.value;
+    const category = document.getElementById('txn-category').value;
+    const remarks = document.getElementById('txn-remarks').value.trim();
 
-    try {
-        const customerId = state.currentCustomerId;
-        const typeValue = document.getElementById('txn-type').value;
+    if (!dateInput) {
+        UIManager.showErrorModal('Validation Error', 'Transaction date is required');
+        return;
+    }
+    if (new Date(dateInput) > new Date()) {
+        UIManager.showErrorModal('Validation Error', 'Transaction date cannot be in the future');
+        return;
+    }
 
-        if (typeValue !== 'debit' && typeValue !== 'credit') {
-            throw new Error('Transaction type must be Debit or Credit');
+    if (!activeModalInterestPhases || activeModalInterestPhases.length === 0) {
+        UIManager.showErrorModal('Validation Error', 'Transaction must have at least one interest schedule phase.');
+        return;
+    }
+
+    const phases = activeModalInterestPhases.map((phase, idx) => {
+        const type = phase.type;
+        const rate = type === 'none' ? 0 : (parseFloat(phase.rate) || 0);
+        const frequency = type === 'compound' ? (phase.frequency || 'yearly') : null;
+        const customDays = (type === 'compound' && frequency === 'custom_days')
+            ? (parseInt(phase.customDays, 10) || null)
+            : null;
+        const endDate = phase.endDate ? phase.endDate : null;
+
+        if (type !== 'none' && (isNaN(rate) || rate < 0)) {
+            throw new Error(`Phase ${idx + 1}: Rate must be a non-negative number.`);
+        }
+        if (type === 'compound' && frequency === 'custom_days' && (!customDays || customDays < 1)) {
+            throw new Error(`Phase ${idx + 1}: Custom Days must be a positive number.`);
+        }
+        if (idx < activeModalInterestPhases.length - 1 && !endDate) {
+            throw new Error(`Phase ${idx + 1}: End Date is required for non-terminal phases.`);
+        }
+        if (endDate && new Date(endDate) < new Date(dateInput)) {
+            throw new Error(`Phase ${idx + 1}: End Date cannot be earlier than Transaction Date.`);
         }
 
-        const amount = parseFloat(document.getElementById('txn-amount').value);
-        const dateInput = document.getElementById('txn-date').value;
-        const interestStartDateInput = document.getElementById('txn-interest-start-date')?.value;
-        const category = document.getElementById('txn-category').value;
-        const remarks = document.getElementById('txn-remarks').value.trim();
-
-        if (!dateInput) {
-            throw new Error('Transaction date is required');
-        }
-        if (new Date(dateInput) > new Date()) {
-            throw new Error('Transaction date cannot be in the future');
-        }
-
-        if (!activeModalInterestPhases || activeModalInterestPhases.length === 0) {
-            throw new Error('Transaction must have at least one interest schedule phase.');
-        }
-
-        const phases = activeModalInterestPhases.map((phase, idx) => {
-            const type = phase.type;
-            const rate = type === 'none' ? 0 : (parseFloat(phase.rate) || 0);
-            const frequency = type === 'compound' ? (phase.frequency || 'yearly') : null;
-            const customDays = (type === 'compound' && frequency === 'custom_days')
-                ? (parseInt(phase.customDays, 10) || null)
-                : null;
-            const endDate = phase.endDate ? phase.endDate : null;
-
-            if (type !== 'none' && (isNaN(rate) || rate < 0)) {
-                throw new Error(`Phase ${idx + 1}: Rate must be a non-negative number.`);
-            }
-            if (type === 'compound' && frequency === 'custom_days' && (!customDays || customDays < 1)) {
-                throw new Error(`Phase ${idx + 1}: Custom Days must be a positive number.`);
-            }
-            if (idx < activeModalInterestPhases.length - 1 && !endDate) {
-                throw new Error(`Phase ${idx + 1}: End Date is required for non-terminal phases.`);
-            }
-            if (endDate && new Date(endDate) < new Date(dateInput)) {
-                throw new Error(`Phase ${idx + 1}: End Date cannot be earlier than Transaction Date.`);
-            }
-
-            return {
-                type,
-                rate,
-                frequency,
-                customDays,
-                endDate
-            };
-        });
-
-        const date = new Date(dateInput).toISOString();
-        const interestStartDate = interestStartDateInput ? new Date(interestStartDateInput).toISOString() : date;
-        const txnIdVal = document.getElementById('txn-id').value;
-        const isEdit = !!txnIdVal;
-        const newTxnId = isEdit ? txnIdVal : `txn_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-        const transactionData = {
-            id: newTxnId,
-            customerId,
-            type: typeValue, // 'debit' | 'credit'
-            category,
-            amount,
-            date,
-            interestStartDate,
-            interestPhases: phases,
-            remarks: remarks || null,
-            isVoid: false,
-            createdAt: isEdit ? (state.transactions.find(t => t.id === newTxnId)?.createdAt || new Date().toISOString()) : new Date().toISOString()
+        return {
+            type,
+            rate,
+            frequency,
+            customDays,
+            endDate
         };
+    });
 
+    const date = new Date(dateInput).toISOString();
+    const interestStartDate = interestStartDateInput ? new Date(interestStartDateInput).toISOString() : date;
+    const txnIdVal = document.getElementById('txn-id').value;
+    const isEdit = !!txnIdVal;
+    const newTxnId = isEdit ? txnIdVal : `txn_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    const transactionData = {
+        id: newTxnId,
+        customerId,
+        type: typeValue,
+        category,
+        amount,
+        date,
+        interestStartDate,
+        interestPhases: phases,
+        remarks: remarks || null,
+        isVoid: false,
+        createdAt: isEdit ? (state.transactions.find(t => t.id === newTxnId)?.createdAt || new Date().toISOString()) : new Date().toISOString()
+    };
+
+    const loadingMsg = isEdit ? "Updating transaction..." : "Recording transaction...";
+    const successMsg = isEdit ? "Transaction updated!" : "Transaction recorded!";
+
+    await UIManager.runAsync(async () => {
         if (isEdit) {
             transactionData.isEdited = true;
             transactionData.editedAt = new Date().toISOString();
@@ -1915,7 +2001,6 @@ document.getElementById('transaction-form').onsubmit = async (e) => {
             state.transactions.push(transactionData);
         }
 
-        // Auto-Reactivate Settled Customer when new transaction is added (Directive 3.3)
         const targetCust = state.customers.find(c => c.id === customerId);
         if (targetCust && targetCust.isSettled) {
             targetCust.isSettled = false;
@@ -1924,45 +2009,30 @@ document.getElementById('transaction-form').onsubmit = async (e) => {
         
         saveData();
 
-        try {
-            if (isEdit) {
-                await LedgerAPI.updateTransaction(newTxnId, {
-                    type: typeValue.toUpperCase(),
-                    amount,
-                    date,
-                    interestStartDate,
-                    interestPhases: phases,
-                    remarks: remarks || null
-                });
-            } else {
-                await LedgerAPI.createTransaction({
-                    customerId,
-                    type: typeValue.toUpperCase(),
-                    amount,
-                    date,
-                    interestStartDate,
-                    interestPhases: phases,
-                    remarks: remarks || null
-                });
-            }
-        } catch (apiErr) {
-            console.warn("Backend sync failed, saved locally:", apiErr);
+        if (isEdit) {
+            await LedgerAPI.updateTransaction(newTxnId, {
+                type: typeValue.toUpperCase(),
+                amount,
+                date,
+                interestStartDate,
+                interestPhases: phases,
+                remarks: remarks || null
+            });
+        } else {
+            await LedgerAPI.createTransaction({
+                customerId,
+                type: typeValue.toUpperCase(),
+                amount,
+                date,
+                interestStartDate,
+                interestPhases: phases,
+                remarks: remarks || null
+            });
         }
 
         e.target.reset();
         toggleModal('transaction-modal', false);
-
-        if (state.currentCustomerId) {
-            renderLedger();
-        }
-    } catch (err) {
-        console.error("Create transaction failed:", err);
-        errorEl.textContent = err.message || 'Unable to create transaction. Please check your connection and try again.';
-        errorEl.classList.remove('hidden');
-    } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = originalBtnText;
-    }
+    }, loadingMsg, successMsg, syncStateFromBackend);
 };
 
 // --- INTEGRATIONS (WhatsApp & PDF) ---
