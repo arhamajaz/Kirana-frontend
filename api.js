@@ -31,7 +31,11 @@ function saveToken(token) {
 }
 
 function getToken() {
-    return localStorage.getItem(TOKEN_KEY) || localStorage.getItem("ml_pro_jwt_token");
+    const token = localStorage.getItem(TOKEN_KEY) || localStorage.getItem("ml_pro_jwt_token");
+    if (!token && localStorage.getItem('ml_pro_test_mode') === 'true') {
+        return "mock_test_mode_token";
+    }
+    return token;
 }
 
 function removeToken() {
@@ -100,12 +104,16 @@ function buildHeaders(authenticated = true) {
  */
 async function request(method, endpoint, body = null, authenticated = false, retries = 2) {
     const isTestMode = localStorage.getItem('ml_pro_test_mode') === 'true';
-    if (isTestMode || (authenticated && !getToken())) {
-        const err = new Error("Authentication required or test mode active.");
-        err.isOffline = true;
-        if (authenticated && !getToken() && onUnauthorizedCallback) {
+    const token = getToken();
+
+    // If route requires authentication, token is missing, and NOT in test mode -> Trigger 401 Auto-Logout
+    if (authenticated && !token && !isTestMode) {
+        if (onUnauthorizedCallback) {
             onUnauthorizedCallback();
         }
+        const err = new Error("Session expired. Please log in again.");
+        err.status = 401;
+        err.isUnauthorized = true;
         throw err;
     }
 
@@ -154,11 +162,13 @@ async function request(method, endpoint, body = null, authenticated = false, ret
     // 401 Interceptor: Token expired or invalid
     if (response.status === 401) {
         removeToken();
-        if (onUnauthorizedCallback) {
+        if (!isTestMode && onUnauthorizedCallback) {
             onUnauthorizedCallback();
         }
-        const err = new Error("Session expired. Please log in again.");
+        const err = new Error(isTestMode ? "Test Mode active (local state mode)" : "Session expired. Please log in again.");
         err.status = 401;
+        err.isUnauthorized = !isTestMode;
+        err.isOffline = isTestMode;
         throw err;
     }
 
