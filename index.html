@@ -608,8 +608,8 @@
                 </div>
 
                 <div class="summary-cards">
-                    <div class="card card-principal">
-                        <h3>Current Principal</h3>
+                    <div class="card card-principal clickable-principal-card" id="card-principal-summary" onclick="showPrincipalBreakdown()" title="Click to view Principal Breakdown">
+                        <h3 class="principal-card-header">Current Principal <i class="ph ph-info principal-info-icon" title="View calculation math"></i></h3>
                         <p id="summary-principal" class="amount stat-principal-amount">₹0.00</p>
                     </div>
                     <div class="card card-interest">
@@ -1307,6 +1307,20 @@
                 <!-- Breakdown injected here via JS -->
             </div>
             <button class="btn-primary full-width modal-close" style="margin-top: 8px;">Got It</button>
+        </div>
+    </div>
+
+    <!-- Principal Breakdown Modal -->
+    <div id="principal-breakdown-modal" class="modal hidden">
+        <div class="modal-content principal-modal-content">
+            <div class="modal-header">
+                <h3><i class="ph ph-calculator" style="color: var(--primary-color); margin-right: 0.5rem;"></i> Principal Breakdown</h3>
+                <button class="btn-close modal-close" onclick="toggleModal('principal-breakdown-modal', false)"><i class="ph ph-x"></i></button>
+            </div>
+            <div id="principal-breakdown-body" class="principal-modal-body">
+                <!-- Breakdown injected dynamically via JS -->
+            </div>
+            <button class="btn-primary full-width modal-close" onclick="toggleModal('principal-breakdown-modal', false)">Close</button>
         </div>
     </div>
 

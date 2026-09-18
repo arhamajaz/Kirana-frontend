@@ -1165,6 +1165,88 @@ function toggleModal(modalId, show) {
     }
 }
 
+// --- PRINCIPAL BREAKDOWN (Directive 2 & 3) ---
+function showPrincipalBreakdown(targetCustomerId = null) {
+    const custId = targetCustomerId || state.currentCustomerId;
+    if (!custId) return;
+
+    const customer = state.customers.find(c => c.id === custId);
+    if (!customer) return;
+
+    // Filter valid non-voided, non-baddebt transactions matching calculateLedger
+    const txns = (state.transactions || []).filter(t => t.customerId === custId && !t.isVoid && !t.isBadDebt);
+
+    // Sum total debits (माल लिया)
+    const totalDebits = roundMoney(
+        txns
+            .filter(t => (t.type || '').toLowerCase() === 'debit')
+            .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0)
+    );
+
+    // Sum total credits (जमा किए)
+    const totalCredits = roundMoney(
+        txns
+            .filter(t => (t.type || '').toLowerCase() === 'credit')
+            .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0)
+    );
+
+    // Calculate rawPrincipal strictly as (Total Debits - Total Credits)
+    const rawPrincipal = roundMoney(totalDebits - totalCredits);
+
+    const body = document.getElementById('principal-breakdown-body');
+    if (!body) return;
+
+    const isDebt = rawPrincipal > 0;
+    const isAdvance = rawPrincipal < 0;
+    const absPrincipal = Math.abs(rawPrincipal);
+    const safeCustName = (customer.name || 'Customer').replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    let statusText = 'Fully Settled (कोई बकाया नहीं)';
+    let statusBadgeClass = 'badge-secondary';
+    if (isDebt) {
+        statusText = 'Net Principal Due (उधार बकाया)';
+        statusBadgeClass = 'badge-danger';
+    } else if (isAdvance) {
+        statusText = 'Advance Credit Balance (अग्रिम राशि)';
+        statusBadgeClass = 'badge-success';
+    }
+
+    body.innerHTML = `
+        <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.25rem;">
+            Customer: <strong style="color: var(--text-primary);">${safeCustName}</strong>
+        </div>
+
+        <div class="principal-math-card">
+            <div class="principal-math-row">
+                <span class="principal-math-label"><i class="ph ph-arrow-up-right" style="color: var(--debit-accent);"></i> Total Debit (माल लिया)</span>
+                <span class="principal-math-val text-danger">${formatCurrency(totalDebits)}</span>
+            </div>
+            <div class="principal-math-row">
+                <span class="principal-math-label"><i class="ph ph-arrow-down-left" style="color: var(--credit-accent);"></i> Total Credit (जमा किए)</span>
+                <span class="principal-math-val text-success">${formatCurrency(totalCredits)}</span>
+            </div>
+            <div class="principal-math-divider"></div>
+            <div class="principal-math-row" style="font-size: 0.95rem;">
+                <span class="principal-math-label" style="font-weight: 700; color: var(--text-primary);">Raw Principal Net Math</span>
+                <span class="principal-math-val ${isDebt ? 'text-danger' : (isAdvance ? 'text-success' : '')}">${formatCurrency(absPrincipal)}${isAdvance ? ' (Advance)' : ''}</span>
+            </div>
+        </div>
+
+        <div class="principal-math-formula">
+            <div style="font-weight: 600; margin-bottom: 0.25rem; color: var(--text-primary);">Detailed Calculation Equation</div>
+            <code style="font-size: 0.85rem; color: var(--primary-color);">₹${totalDebits.toFixed(2)} (Debits) - ₹${totalCredits.toFixed(2)} (Credits) = ${rawPrincipal < 0 ? '-' : ''}₹${absPrincipal.toFixed(2)}</code>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-color); border: 0.0625rem solid var(--border-color); border-radius: 0.5rem; padding: 0.625rem 0.875rem; font-size: 0.85rem;">
+            <span style="color: var(--text-secondary);">Principal Status:</span>
+            <span class="badge ${statusBadgeClass}">${statusText}</span>
+        </div>
+    `;
+
+    toggleModal('principal-breakdown-modal', true);
+}
+
+
 // ==========================================
 // --- SETTLEMENT ENGINE & ARCHIVING (Directives 2 & 3) ---
 // ==========================================
@@ -2041,7 +2123,7 @@ document.getElementById('btn-whatsapp').onclick = () => {
     const customer = state.customers.find(c => c.id === state.currentCustomerId);
     const ledger = calculateLedger(state.currentCustomerId);
     
-    if(ledger.totalNet >= 0) {
+    if (ledger.totalNet <= 0) {
         alert("This customer does not owe any money.");
         return;
     }
