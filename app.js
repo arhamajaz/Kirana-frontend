@@ -1920,56 +1920,30 @@ function openTransactionDetailModal(txnId) {
     const txn = (state.transactions || []).find(t => t.id === txnId);
     if (!txn) return;
 
-    const customer = state.customers.find(c => c.id === txn.customerId);
-    const asOfDateInput = document.getElementById('ledger-as-of-date');
-    const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
-    const asOfDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
-
-    const ledger = calculateLedger(txn.customerId, asOfDateStr);
-    const row = (ledger.rows || []).find(r => r.id === txnId) || txn;
-    const silo = (ledger.silos || []).find(s => s.id === txnId);
-
     const isDebit = txn.type === 'debit';
-    const startDate = txn.interestStartDate || txn.date;
-    const durationStr = calculateDuration(startDate, asOfDate);
-    const accruedInterest = isDebit ? (silo ? silo.accruedInterest : (row.runningInterest || 0)) : 0;
     const principalAmt = parseFloat(txn.amount) || 0;
-    const effectiveAmt = isDebit ? (principalAmt + accruedInterest) : principalAmt;
 
     const body = document.getElementById('txn-detail-body');
     if (!body) return;
 
     body.innerHTML = `
-        <div class="detail-metrics-grid">
+        <div class="detail-metrics-grid" style="grid-template-columns: 1fr;">
             <div class="detail-metric-card">
                 <span class="detail-metric-label">Principal Amount</span>
                 <span class="detail-metric-val ${isDebit ? 'text-danger' : 'text-success'}">${formatCurrency(principalAmt)}</span>
             </div>
-            <div class="detail-metric-card">
-                <span class="detail-metric-label">Interest Duration</span>
-                <span class="detail-metric-val"><span class="duration-pill"><i class="ph ph-clock"></i> ${durationStr}</span></span>
-            </div>
-            <div class="detail-metric-card">
-                <span class="detail-metric-label">Interest on Principal</span>
-                <span class="detail-metric-val text-danger">${isDebit ? formatCurrency(accruedInterest) : '₹0.00'}</span>
-            </div>
-            <div class="detail-metric-card">
-                <span class="detail-metric-label">Effective Amount</span>
-                <span class="detail-metric-val ${isDebit ? 'text-danger' : 'text-success'}">${formatCurrency(effectiveAmt)}</span>
-            </div>
         </div>
 
-        <div style="background: var(--bg-color); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); font-size: 0.88rem; display: flex; flex-direction: column; gap: 6px;">
+        <div style="background: var(--bg-color); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); font-size: 0.88rem; display: flex; flex-direction: column; gap: 6px; margin-top: 12px;">
             <div><strong>Transaction Date:</strong> ${formatDate(txn.date)}</div>
             ${txn.interestStartDate ? `<div><strong>Calculate Interest From:</strong> ${formatDate(txn.interestStartDate)}</div>` : ''}
             <div><strong>Category:</strong> <span class="badge">${txn.category || 'Cash'}</span></div>
             <div><strong>Remarks:</strong> ${txn.remarks || 'None'}</div>
-            ${isDebit ? `<div><strong>Interest Rate / Rule:</strong> ${(txn.interestRate !== undefined ? txn.interestRate : (customer?.lendingRate || 12))}% / yr (${(txn.interestType || 'simple').toUpperCase()})</div>` : ''}
             ${txn.isVoid ? `<div class="text-danger"><strong>Status:</strong> VOIDED (Reason: ${txn.voidReason || 'Reversed'})</div>` : ''}
             ${txn.isBadDebt ? `<div class="text-danger"><strong>Status:</strong> WRITTEN OFF TO BAD DEBT</div>` : ''}
         </div>
 
-        <div class="detail-actions-bar">
+        <div class="detail-actions-bar" style="margin-top: 12px;">
             ${!txn.isVoid && !txn.isBadDebt ? `
                 <button type="button" class="btn-outline btn-sm" onclick="toggleModal('txn-detail-modal', false); editTransaction('${txn.id}')">
                     <i class="ph ph-pencil-simple"></i> Edit Entry
@@ -3897,189 +3871,264 @@ function runStandaloneCalculation() {
 }
 
 // --- AUDIT & TRANSPARENCY FEATURES ---
-function showInterestBreakdown(txnId = null) {
+function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
+    const customer = (state.customers || []).find(c => c.id === customerId);
+    const rawRate = customer?.lendingRate;
+    const defaultRate = (rawRate !== undefined && rawRate !== null && !isNaN(parseFloat(rawRate))) ? parseFloat(rawRate) : 2;
+
+    const asOfDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
+    asOfDate.setHours(23, 59, 59, 999);
+
+    const txns = (state.transactions || [])
+        .filter(t => t.customerId === customerId && !t.isVoid && !t.is_void && !t.isBadDebt)
+        .filter(t => {
+            const tDate = new Date(t.date);
+            return !isNaN(tDate.getTime()) && tDate <= asOfDate;
+        })
+        .sort((a, b) => {
+            const dA = new Date(a.date).getTime();
+            const dB = new Date(b.date).getTime();
+            if (dA !== dB) return dA - dB;
+            const typeA = String(a.type).toUpperCase();
+            const typeB = String(b.type).toUpperCase();
+            if (typeA !== typeB) return typeA === 'DEBIT' ? -1 : 1;
+            return 0;
+        });
+
+    let principalDue = 0;
+    let advanceBalance = 0;
+    let accruedInterest = 0;
+    const breakdownLog = [];
+    let lastDate = null;
+    let activeRate = defaultRate;
+
+    for (const tx of txns) {
+        const txDate = new Date(tx.date);
+        if (isNaN(txDate.getTime())) continue;
+
+        if (lastDate !== null) {
+            const exactDays = Math.max(0, Math.round((txDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)));
+            if (exactDays > 0) {
+                if (principalDue > 0 && advanceBalance === 0) {
+                    const elapsedMonths = exactDays / 30;
+                    const newInterest = roundMoney(principalDue * (activeRate / 100) * elapsedMonths);
+                    accruedInterest = roundMoney(accruedInterest + newInterest);
+                    breakdownLog.push({
+                        startDate: new Date(lastDate),
+                        endDate: new Date(txDate),
+                        daysElapsed: exactDays,
+                        activePrincipal: principalDue,
+                        interestGenerated: newInterest,
+                        rateApplied: activeRate,
+                        isAdvance: false
+                    });
+                } else if (advanceBalance > 0) {
+                    breakdownLog.push({
+                        startDate: new Date(lastDate),
+                        endDate: new Date(txDate),
+                        daysElapsed: exactDays,
+                        activePrincipal: 0,
+                        interestGenerated: 0,
+                        rateApplied: 0,
+                        isAdvance: true
+                    });
+                }
+            }
+        }
+
+        const txRate = tx.interestRate ?? tx.rate;
+        if (txRate !== undefined && txRate !== null && !isNaN(Number(txRate))) {
+            activeRate = Number(txRate);
+        }
+
+        let amount = roundMoney(Number(tx.amount) || 0);
+        const type = String(tx.type).toUpperCase();
+
+        if (type === 'DEBIT') {
+            const deduction = roundMoney(Math.min(amount, advanceBalance));
+            advanceBalance = roundMoney(advanceBalance - deduction);
+            amount = roundMoney(amount - deduction);
+            principalDue = roundMoney(principalDue + amount);
+        } else if (type === 'CREDIT') {
+            const intPayment = roundMoney(Math.min(amount, accruedInterest));
+            accruedInterest = roundMoney(accruedInterest - intPayment);
+            amount = roundMoney(amount - intPayment);
+
+            const prinPayment = roundMoney(Math.min(amount, principalDue));
+            principalDue = roundMoney(principalDue - prinPayment);
+            amount = roundMoney(amount - prinPayment);
+
+            advanceBalance = roundMoney(advanceBalance + amount);
+        }
+
+        lastDate = txDate;
+    }
+
+    if (asOfDate && !isNaN(asOfDate.getTime()) && lastDate !== null) {
+        if (asOfDate.getTime() > lastDate.getTime()) {
+            const exactDays = Math.max(0, Math.round((asOfDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)));
+            if (exactDays > 0) {
+                if (principalDue > 0 && advanceBalance === 0) {
+                    const elapsedMonths = exactDays / 30;
+                    const newInterest = roundMoney(principalDue * (activeRate / 100) * elapsedMonths);
+                    accruedInterest = roundMoney(accruedInterest + newInterest);
+                    breakdownLog.push({
+                        startDate: new Date(lastDate),
+                        endDate: new Date(asOfDate),
+                        daysElapsed: exactDays,
+                        activePrincipal: principalDue,
+                        interestGenerated: newInterest,
+                        rateApplied: activeRate,
+                        isAdvance: false
+                    });
+                } else if (advanceBalance > 0) {
+                    breakdownLog.push({
+                        startDate: new Date(lastDate),
+                        endDate: new Date(asOfDate),
+                        daysElapsed: exactDays,
+                        activePrincipal: 0,
+                        interestGenerated: 0,
+                        rateApplied: 0,
+                        isAdvance: true
+                    });
+                }
+            }
+        }
+    }
+
+    return breakdownLog;
+}
+
+async function showInterestBreakdown(txnId = null) {
     const targetCustId = state.currentCustomerId;
     if (!targetCustId) return;
 
-    const customer = state.customers.find(c => c.id === targetCustId);
-    const defaultLendingRate = customer?.lendingRate !== undefined ? parseFloat(customer.lendingRate) : 12;
-
-    const asOfDateInput = document.getElementById('ledger-as-of-date');
-    const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
-    const toDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
-    toDate.setHours(23, 59, 59, 999);
-
-    const ledger = calculateLedger(targetCustId, asOfDateStr);
     const container = document.getElementById('interest-breakdown-body');
     if (!container) return;
 
-    // Filter active non-voided, non-baddebt debit silos matching engine calculation
-    const silos = (ledger.silos || []).filter(s => !s.isVoid && !s.isBadDebt && (!txnId || s.id === txnId));
+    const asOfDateInput = document.getElementById('ledger-as-of-date');
+    const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
 
-    // Handle 0 Interest or Advance State gracefully without error popups
-    if (ledger.totalAccruedInterest === 0 || silos.length === 0) {
-        let emptyStateHtml = '';
-        if (ledger.excessCredit > 0 || (ledger.rawPrincipal < 0)) {
-            const advAmt = Math.abs(ledger.excessCredit || ledger.rawPrincipal);
-            emptyStateHtml = `
-                <div class="calc-breakdown-card" style="border: 1px solid var(--credit-accent); background: rgba(22, 163, 74, 0.05);">
-                    <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--credit-accent); margin-bottom: 6px;">
-                        <i class="ph ph-check-circle" style="font-size: 1.2rem;"></i>
-                        <span>Balance is Currently in Advance (₹${advAmt.toFixed(2)} Credit)</span>
-                    </div>
-                    <div style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">
-                        0% interest applies to advance credit balances. Zero interest has accrued as of ${formatDate(toDate)}.
-                    </div>
-                </div>
-            `;
-        } else if (silos.length > 0) {
-            emptyStateHtml = `
-                <div class="calc-breakdown-card">
-                    <div style="font-weight: 700; color: var(--text-primary); margin-bottom: 6px;">
-                        <i class="ph ph-clock" style="color: var(--primary-color);"></i> 0 Days Elapsed / Zero Rate
-                    </div>
-                    <div style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">
-                        Transaction interest calculation begins from transaction date. Accrued interest is currently ₹0.00.
-                    </div>
-                </div>
-            `;
-        } else {
-            emptyStateHtml = `
-                <div class="calc-breakdown-card">
-                    <div style="font-weight: 600; color: var(--text-secondary); text-align: center; padding: 1rem 0;">
-                        No active debit balance requiring interest calculation as of ${formatDate(toDate)}.
-                    </div>
-                </div>
-            `;
+    // Show modal immediately with loading indicator
+    container.innerHTML = `
+        <div class="text-center" style="padding: 2rem; color: var(--text-secondary);">
+            <i class="ph ph-spinner spinner spin" style="font-size: 1.5rem;"></i>
+            <div style="margin-top: 8px;">Fetching backend ledger breakdown...</div>
+        </div>
+    `;
+    toggleModal('interest-breakdown-modal', true);
+
+    let breakdownLog = null;
+    let totalInterestSum = 0;
+
+    try {
+        if (state.isAuthenticated && LedgerAPI.getToken() && !state.isTestMode) {
+            const params = {};
+            if (asOfDateStr) {
+                params.calculationDate = asOfDateStr;
+            }
+            const backendLedger = await LedgerAPI.getCustomerLedger(targetCustId, params);
+            if (backendLedger) {
+                breakdownLog = backendLedger.breakdownLog || backendLedger.data?.breakdownLog;
+                totalInterestSum = backendLedger.totalAccruedInterest ?? backendLedger.summary?.accruedInterest ?? 0;
+            }
         }
+    } catch (err) {
+        console.warn("Backend ledger fetch failed for interest breakdown, using local fallback:", err);
+    }
 
+    if (!breakdownLog) {
+        breakdownLog = computeLocalBreakdownLog(targetCustId, asOfDateStr);
+        totalInterestSum = breakdownLog.reduce((sum, item) => sum + (item.interestGenerated || 0), 0);
+    }
+
+    totalInterestSum = roundMoney(totalInterestSum);
+
+    if (!breakdownLog || breakdownLog.length === 0) {
         container.innerHTML = `
-            ${emptyStateHtml}
+            <div class="calc-breakdown-card">
+                <div style="font-weight: 600; color: var(--text-secondary); text-align: center; padding: 1rem 0;">
+                    No active debit balance requiring interest calculation.
+                </div>
+            </div>
             <div style="background: var(--surface-color); padding: 14px; border-radius: 10px; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
-                <span style="font-weight: 700; color: var(--text-primary);">Total Accrued Ledger Interest:</span>
+                <span style="font-weight: 700; color: var(--text-primary);">Total Accrued Interest:</span>
                 <span class="amount text-success" style="font-size: 1.2rem; font-weight: 800;">₹0.00</span>
             </div>
         `;
-        toggleModal('interest-breakdown-modal', true);
         return;
     }
 
     let html = '';
-    let totalLedgerInterest = 0;
 
-    silos.forEach((silo, index) => {
-        const startDate = silo.interestStartDate ? new Date(silo.interestStartDate) : new Date(silo.date);
-        const diffTime = Math.max(0, toDate.getTime() - startDate.getTime());
-        const totalDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-        const durationText = calculateDuration(startDate, toDate);
+    breakdownLog.forEach((phase, index) => {
+        const startDateStr = formatDate(phase.startDate);
+        const endDateStr = formatDate(phase.endDate);
+        const days = phase.daysElapsed;
 
-        const principalAmt = parseFloat(silo.amount) || 0;
-        const rate = silo.interestRate !== undefined ? parseFloat(silo.interestRate) : defaultLendingRate;
-        const interestType = (silo.interestType || customer?.defaultInterestType || 'simple').toLowerCase();
-
-        const accruedInterest = silo.accruedInterest || 0;
-        totalLedgerInterest = roundMoney(totalLedgerInterest + accruedInterest);
-
-        let formulaStr = '';
-        let breakdownRule = '';
-
-        if (interestType === 'none' || interestType === 'no_interest') {
-            breakdownRule = '0% Interest (No Interest)';
-            formulaStr = `${formatCurrency(principalAmt)} × 0% = ₹0.00`;
-        } else if (interestType === 'simple') {
-            breakdownRule = `Simple Interest (${rate}% p.a.)`;
-            formulaStr = `${formatCurrency(principalAmt)} × ${rate}% × (${totalDays} / 365 days) = ${formatCurrency(accruedInterest)}`;
+        if (phase.isAdvance) {
+            html += `
+                <div class="calc-breakdown-card" style="border-left: 4px solid var(--accent-color, #10b981);">
+                    <div class="calc-card-header">
+                        <div>
+                            <strong style="font-size: 0.95rem; color: var(--text-primary);">Phase ${index + 1}: ${startDateStr} → ${endDateStr}</strong>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
+                                Duration: ${days} day${days === 1 ? '' : 's'}
+                            </div>
+                        </div>
+                        <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; font-weight: 600; padding: 4px 8px; border-radius: 6px;">Zero Interest</span>
+                    </div>
+                    <div style="font-size: 0.88rem; line-height: 1.6; color: var(--text-primary); margin-top: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="color: var(--text-secondary);">Balance Status:</span>
+                            <strong style="color: #10b981;">Balance in Advance — 0% Interest Accrued</strong>
+                        </div>
+                    </div>
+                </div>
+            `;
         } else {
-            const compFreq = (silo.compoundingFrequency || customer?.compoundingFrequency || customer?.compoundFrequency || 'yearly').toLowerCase();
-            let freqNum = 1;
-            let periodDays = 365;
-            let freqLabel = 'Year';
+            const activePrincipal = phase.activePrincipal || 0;
+            const interestGen = phase.interestGenerated || 0;
+            const rateApplied = phase.rateApplied || 0;
 
-            switch (compFreq) {
-                case 'monthly':
-                    freqNum = 12;
-                    periodDays = 365 / 12;
-                    freqLabel = 'Month';
-                    break;
-                case 'half-yearly':
-                case 'half_yearly':
-                    freqNum = 2;
-                    periodDays = 365 / 2;
-                    freqLabel = 'Half-Year';
-                    break;
-                case 'quarterly':
-                    freqNum = 4;
-                    periodDays = 365 / 4;
-                    freqLabel = 'Quarter';
-                    break;
-                case 'yearly':
-                default:
-                    freqNum = 1;
-                    periodDays = 365;
-                    freqLabel = 'Year';
-                    break;
-            }
-
-            const periodRate = (rate / 100) / freqNum;
-            const fullPeriods = Math.floor(totalDays / periodDays);
-            const remDays = Math.round(totalDays - (fullPeriods * periodDays));
-
-            const part1Comp = fullPeriods > 0 ? `${fullPeriods} ${freqLabel}${fullPeriods > 1 ? 's' : ''} Compound (${rate}%)` : '';
-            const part2Simp = remDays > 0 || fullPeriods === 0 ? `${remDays} Days Simple (${rate}%)` : '';
-            breakdownRule = [part1Comp, part2Simp].filter(Boolean).join(' + ');
-
-            const compoundedAmount = roundMoney(principalAmt * Math.pow(1 + periodRate, fullPeriods));
-            const simpleOnCompounded = roundMoney(compoundedAmount * periodRate * (remDays / periodDays));
-
-            if (fullPeriods > 0 && remDays > 0) {
-                formulaStr = `<strong>Step 1 (${fullPeriods} ${freqLabel}${fullPeriods > 1 ? 's' : ''} Compound):</strong> ${formatCurrency(principalAmt)} × (1 + ${rate}% / ${freqNum})^${fullPeriods} = ${formatCurrency(compoundedAmount)}<br>` +
-                             `<strong>Step 2 (${remDays} Days Simple):</strong> ${formatCurrency(compoundedAmount)} + [${formatCurrency(compoundedAmount)} × (${rate}% / ${freqNum}) × (${remDays} / ${roundMoney(periodDays)})] = ${formatCurrency(roundMoney(compoundedAmount + simpleOnCompounded))}`;
-            } else if (fullPeriods > 0) {
-                formulaStr = `<strong>Compound Formula:</strong> ${formatCurrency(principalAmt)} × (1 + ${rate}% / ${freqNum})^${fullPeriods} - ${formatCurrency(principalAmt)} = ${formatCurrency(accruedInterest)}`;
-            } else {
-                formulaStr = `<strong>Simple Formula:</strong> ${formatCurrency(principalAmt)} × ${rate}% × (${totalDays} / 365 days) = ${formatCurrency(accruedInterest)}`;
-            }
+            html += `
+                <div class="calc-breakdown-card" style="border-left: 4px solid var(--primary-color, #3b82f6);">
+                    <div class="calc-card-header">
+                        <div>
+                            <strong style="font-size: 0.95rem; color: var(--text-primary);">Phase ${index + 1}: ${startDateStr} → ${endDateStr}</strong>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
+                                Active Balance: ${formatCurrency(activePrincipal)} | Rate: ${rateApplied}% monthly | Duration: ${days} day${days === 1 ? '' : 's'}
+                            </div>
+                        </div>
+                        <span class="amt-debit" style="font-size: 1rem; font-weight: 700;">+${formatCurrency(interestGen)}</span>
+                    </div>
+                    <div style="font-size: 0.88rem; line-height: 1.6; color: var(--text-primary); margin-top: 8px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                            <span style="color: var(--text-secondary);">Active Principal:</span>
+                            <strong>${formatCurrency(activePrincipal)}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                            <span style="color: var(--text-secondary);">Calculation Formula:</span>
+                            <span>${formatCurrency(activePrincipal)} × ${rateApplied}% × (${days}/30 months)</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-weight: 700; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border-color);">
+                            <span>Interest Accrued in Phase:</span>
+                            <span class="text-danger" style="font-size: 1rem;">${formatCurrency(interestGen)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
         }
-
-        html += `
-            <div class="calc-breakdown-card">
-                <div class="calc-card-header">
-                    <div>
-                        <strong style="font-size: 1rem; color: var(--text-primary);">Item #${index + 1}: ${silo.remarks || 'Debit Entry'}</strong>
-                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
-                            Category: ${silo.category || 'Cash'} | Txn Date: ${formatDate(silo.date)}
-                        </div>
-                    </div>
-                    <span class="amt-debit">${formatCurrency(principalAmt)}</span>
-                </div>
-                <div style="font-size: 0.88rem; line-height: 1.5; color: var(--text-primary);">
-                    <div><strong>Time Period:</strong> ${formatDate(startDate)} → ${formatDate(toDate)}</div>
-                    <div><strong>Duration:</strong> <span class="duration-pill"><i class="ph ph-clock"></i> ${durationText} (${totalDays} Days)</span></div>
-                    <div class="calc-math-box">
-                        <div style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 4px;">Rule: ${breakdownRule}</div>
-                        <div>${formulaStr}</div>
-                        <div style="margin-top: 6px; font-weight: 700; color: var(--debit-accent);">
-                            = Accrued Interest: ${formatCurrency(accruedInterest)}
-                        </div>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; font-weight: 700; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color);">
-                        <span>Effective Remaining Total (Principal + Interest):</span>
-                        <span class="text-danger">${formatCurrency(silo.principalRemaining + accruedInterest)}</span>
-                    </div>
-                </div>
-            </div>
-        `;
     });
 
     html += `
         <div style="background: var(--surface-color); padding: 14px; border-radius: 10px; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
-            <span style="font-weight: 700; color: var(--text-primary);">Total Accrued Ledger Interest:</span>
-            <span class="amount text-danger" style="font-size: 1.2rem; font-weight: 800;">${formatCurrency(totalLedgerInterest)}</span>
+            <span style="font-weight: 700; color: var(--text-primary);">Total Accrued Interest:</span>
+            <span class="amount ${totalInterestSum > 0 ? 'text-danger' : 'text-success'}" style="font-size: 1.2rem; font-weight: 800;">${formatCurrency(totalInterestSum)}</span>
         </div>
     `;
 
     container.innerHTML = html;
-    toggleModal('interest-breakdown-modal', true);
 }
 
 document.getElementById('ledger-as-of-date')?.addEventListener('change', renderLedger);
