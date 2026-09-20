@@ -3873,8 +3873,8 @@ function runStandaloneCalculation() {
 // --- AUDIT & TRANSPARENCY FEATURES ---
 function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
     const customer = (state.customers || []).find(c => c.id === customerId);
-    const rawRate = customer?.lendingRate;
-    const defaultRate = (rawRate !== undefined && rawRate !== null && !isNaN(parseFloat(rawRate))) ? parseFloat(rawRate) : 2;
+    const rawRateVal = customer?.lendingRate;
+    const defaultRate = (rawRateVal !== undefined && rawRateVal !== null && !isNaN(parseFloat(rawRateVal))) ? parseFloat(rawRateVal) : 2;
 
     const asOfDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
     asOfDate.setHours(23, 59, 59, 999);
@@ -3900,7 +3900,8 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
     let accruedInterest = 0;
     const breakdownLog = [];
     let lastDate = null;
-    let activeRate = defaultRate;
+    let rawActiveRate = defaultRate;
+    let activeIsYearly = rawActiveRate > 5;
 
     for (const tx of txns) {
         const txDate = new Date(tx.date);
@@ -3909,9 +3910,14 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
         if (lastDate !== null) {
             const exactDays = Math.max(0, Math.round((txDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)));
             if (exactDays > 0) {
+                const effectiveMonthlyRate = activeIsYearly ? rawActiveRate / 12 : rawActiveRate;
+                const rateLabel = activeIsYearly 
+                    ? `${roundMoney(effectiveMonthlyRate)}% monthly (${rawActiveRate}% yearly)` 
+                    : `${rawActiveRate}% monthly`;
+
                 if (principalDue > 0 && advanceBalance === 0) {
                     const elapsedMonths = exactDays / 30;
-                    const newInterest = roundMoney(principalDue * (activeRate / 100) * elapsedMonths);
+                    const newInterest = roundMoney(principalDue * (effectiveMonthlyRate / 100) * elapsedMonths);
                     accruedInterest = roundMoney(accruedInterest + newInterest);
                     breakdownLog.push({
                         startDate: new Date(lastDate),
@@ -3919,7 +3925,9 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                         daysElapsed: exactDays,
                         activePrincipal: principalDue,
                         interestGenerated: newInterest,
-                        rateApplied: activeRate,
+                        interestAccrued: newInterest,
+                        rateApplied: rateLabel,
+                        monthlyRate: effectiveMonthlyRate,
                         isAdvance: false
                     });
                 } else if (advanceBalance > 0) {
@@ -3929,7 +3937,9 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                         daysElapsed: exactDays,
                         activePrincipal: 0,
                         interestGenerated: 0,
-                        rateApplied: 0,
+                        interestAccrued: 0,
+                        rateApplied: '0%',
+                        monthlyRate: 0,
                         isAdvance: true
                     });
                 }
@@ -3938,7 +3948,12 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
 
         const txRate = tx.interestRate ?? tx.rate;
         if (txRate !== undefined && txRate !== null && !isNaN(Number(txRate))) {
-            activeRate = Number(txRate);
+            rawActiveRate = Number(txRate);
+            if (tx.rateUnit === 'yearly' || tx.rateUnit === 'annual' || tx.isAnnual || rawActiveRate > 5) {
+                activeIsYearly = tx.rateUnit !== 'monthly';
+            } else {
+                activeIsYearly = false;
+            }
         }
 
         let amount = roundMoney(Number(tx.amount) || 0);
@@ -3968,9 +3983,14 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
         if (asOfDate.getTime() > lastDate.getTime()) {
             const exactDays = Math.max(0, Math.round((asOfDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)));
             if (exactDays > 0) {
+                const effectiveMonthlyRate = activeIsYearly ? rawActiveRate / 12 : rawActiveRate;
+                const rateLabel = activeIsYearly 
+                    ? `${roundMoney(effectiveMonthlyRate)}% monthly (${rawActiveRate}% yearly)` 
+                    : `${rawActiveRate}% monthly`;
+
                 if (principalDue > 0 && advanceBalance === 0) {
                     const elapsedMonths = exactDays / 30;
-                    const newInterest = roundMoney(principalDue * (activeRate / 100) * elapsedMonths);
+                    const newInterest = roundMoney(principalDue * (effectiveMonthlyRate / 100) * elapsedMonths);
                     accruedInterest = roundMoney(accruedInterest + newInterest);
                     breakdownLog.push({
                         startDate: new Date(lastDate),
@@ -3978,7 +3998,9 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                         daysElapsed: exactDays,
                         activePrincipal: principalDue,
                         interestGenerated: newInterest,
-                        rateApplied: activeRate,
+                        interestAccrued: newInterest,
+                        rateApplied: rateLabel,
+                        monthlyRate: effectiveMonthlyRate,
                         isAdvance: false
                     });
                 } else if (advanceBalance > 0) {
@@ -3988,7 +4010,9 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                         daysElapsed: exactDays,
                         activePrincipal: 0,
                         interestGenerated: 0,
-                        rateApplied: 0,
+                        interestAccrued: 0,
+                        rateApplied: '0%',
+                        monthlyRate: 0,
                         isAdvance: true
                     });
                 }
@@ -4039,7 +4063,7 @@ async function showInterestBreakdown(txnId = null) {
 
     if (!breakdownLog) {
         breakdownLog = computeLocalBreakdownLog(targetCustId, asOfDateStr);
-        totalInterestSum = breakdownLog.reduce((sum, item) => sum + (item.interestGenerated || 0), 0);
+        totalInterestSum = breakdownLog.reduce((sum, item) => sum + (item.interestAccrued ?? item.interestGenerated ?? 0), 0);
     }
 
     totalInterestSum = roundMoney(totalInterestSum);
@@ -4088,8 +4112,8 @@ async function showInterestBreakdown(txnId = null) {
             `;
         } else {
             const activePrincipal = phase.activePrincipal || 0;
-            const interestGen = phase.interestGenerated || 0;
-            const rateApplied = phase.rateApplied || 0;
+            const interestGen = phase.interestAccrued !== undefined ? phase.interestAccrued : (phase.interestGenerated || 0);
+            const rateLabel = typeof phase.rateApplied === 'number' ? `${phase.rateApplied}% monthly` : (phase.rateApplied || '2% monthly');
 
             html += `
                 <div class="calc-breakdown-card" style="border-left: 4px solid var(--primary-color, #3b82f6);">
@@ -4097,7 +4121,7 @@ async function showInterestBreakdown(txnId = null) {
                         <div>
                             <strong style="font-size: 0.95rem; color: var(--text-primary);">Phase ${index + 1}: ${startDateStr} → ${endDateStr}</strong>
                             <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
-                                Active Balance: ${formatCurrency(activePrincipal)} | Rate: ${rateApplied}% monthly | Duration: ${days} day${days === 1 ? '' : 's'}
+                                Active Balance: ${formatCurrency(activePrincipal)} | Rate: ${rateLabel} | Duration: ${days} day${days === 1 ? '' : 's'}
                             </div>
                         </div>
                         <span class="amt-debit" style="font-size: 1rem; font-weight: 700;">+${formatCurrency(interestGen)}</span>
@@ -4109,7 +4133,7 @@ async function showInterestBreakdown(txnId = null) {
                         </div>
                         <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
                             <span style="color: var(--text-secondary);">Calculation Formula:</span>
-                            <span>${formatCurrency(activePrincipal)} × ${rateApplied}% × (${days}/30 months)</span>
+                            <span>${formatCurrency(activePrincipal)} × ${rateLabel} × (${days}/30 months)</span>
                         </div>
                         <div style="display: flex; justify-content: space-between; font-weight: 700; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border-color);">
                             <span>Interest Accrued in Phase:</span>
