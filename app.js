@@ -585,11 +585,67 @@ document.addEventListener('click', (e) => {
 });
 
 // --- CORE FINANCIAL MATH ENGINE ---
-// --- CORE FINANCIAL MATH ENGINE ---
 function roundMoney(value) {
     const num = typeof value === 'number' ? value : (parseFloat(value) || 0);
     return Math.round((num + Number.EPSILON) * 100) / 100;
 }
+
+/**
+ * Calculates elapsed calendar months between two dates using start-date day-of-month anchoring,
+ * month-end clamping (e.g. 31 Jan -> 28/29 Feb), and prorated partial months using actual calendar days.
+ */
+function calculateElapsedCalendarMonths(startDate, endDate) {
+    if (!startDate || !endDate) return 0;
+    const d1 = new Date(startDate);
+    const d2 = new Date(endDate);
+    if (isNaN(d1.getTime()) || isNaN(d2.getTime()) || d2 <= d1) return 0;
+
+    const anchorDay = d1.getDate();
+    let months = 0;
+    let current = new Date(d1.getTime());
+
+    while (true) {
+        let targetYear = current.getFullYear();
+        let targetMonth = current.getMonth() + 1;
+        if (targetMonth > 11) {
+            targetYear += Math.floor(targetMonth / 12);
+            targetMonth = targetMonth % 12;
+        }
+
+        const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+        const targetDay = Math.min(anchorDay, daysInTargetMonth);
+
+        const nextAnniversary = new Date(targetYear, targetMonth, targetDay, d1.getHours(), d1.getMinutes(), d1.getSeconds(), d1.getMilliseconds());
+
+        if (nextAnniversary <= d2) {
+            months += 1;
+            current = nextAnniversary;
+        } else {
+            break;
+        }
+    }
+
+    if (current < d2) {
+        const msDiff = d2.getTime() - current.getTime();
+        const remainingDays = msDiff / (1000 * 60 * 60 * 24);
+
+        let nextYear = current.getFullYear();
+        let nextMonth = current.getMonth() + 1;
+        if (nextMonth > 11) {
+            nextYear += Math.floor(nextMonth / 12);
+            nextMonth = nextMonth % 12;
+        }
+        const daysInNextMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
+        const targetDay = Math.min(anchorDay, daysInNextMonth);
+        const nextAnniversary = new Date(nextYear, nextMonth, targetDay, d1.getHours(), d1.getMinutes(), d1.getSeconds(), d1.getMilliseconds());
+
+        const spanDays = Math.max(1, (nextAnniversary.getTime() - current.getTime()) / (1000 * 60 * 60 * 24));
+        months += remainingDays / spanDays;
+    }
+
+    return months;
+}
+
 
 function calculateLedger(customerId, asOfDateStr = null) {
     const customer = state.customers.find(c => c.id === customerId);
@@ -663,44 +719,30 @@ function calculateLedger(customerId, asOfDateStr = null) {
             const rateFrac = (parseFloat(phase.rate) || 0) / 100;
             let phaseInterest = 0;
 
+            const elapsedMonths = calculateElapsedCalendarMonths(dStart, dEnd);
+            const monthlyRate = rateFrac > 0.05 ? rateFrac / 12 : rateFrac;
+
             if (phase.type === 'simple' && rateFrac > 0) {
-                phaseInterest = roundMoney(compoundingBase * rateFrac * (days / 365));
+                phaseInterest = roundMoney(compoundingBase * monthlyRate * elapsedMonths);
             } else if (phase.type === 'compound' && rateFrac > 0) {
-                let freqNum = 1;
-                let periodDays = 365;
+                let freqNum = 12;
+                if (phase.frequency === 'yearly') freqNum = 1;
+                else if (phase.frequency === 'half-yearly') freqNum = 2;
+                else if (phase.frequency === 'quarterly') freqNum = 4;
+                else if (phase.frequency === 'monthly') freqNum = 12;
 
-                switch (phase.frequency) {
-                    case 'monthly':
-                        freqNum = 12;
-                        periodDays = 365 / 12;
-                        break;
-                    case 'quarterly':
-                        freqNum = 4;
-                        periodDays = 365 / 4;
-                        break;
-                    case 'half-yearly':
-                        freqNum = 2;
-                        periodDays = 365 / 2;
-                        break;
-                    case 'custom_days':
-                        periodDays = Math.max(1, parseInt(phase.customDays, 10) || 30);
-                        freqNum = 365 / periodDays;
-                        break;
-                    case 'yearly':
-                    default:
-                        freqNum = 1;
-                        periodDays = 365;
-                        break;
+                if (freqNum === 12) {
+                    phaseInterest = roundMoney(compoundingBase * monthlyRate * elapsedMonths);
+                } else {
+                    const periodRate = rateFrac / freqNum;
+                    const periodDays = 365 / freqNum;
+                    const fullPeriods = Math.floor(days / periodDays);
+                    const remainingDays = days - (fullPeriods * periodDays);
+
+                    const amountAfterFull = compoundingBase * Math.pow(1 + periodRate, fullPeriods);
+                    const finalAmount = amountAfterFull + (amountAfterFull * periodRate * (remainingDays / periodDays));
+                    phaseInterest = roundMoney(finalAmount - compoundingBase);
                 }
-
-                // Banking Standard Hybrid Compounding: Full periods compounded + remaining days simple
-                const periodRate = rateFrac / freqNum;
-                const fullPeriods = Math.floor(days / periodDays);
-                const remainingDays = days - (fullPeriods * periodDays);
-
-                const amountAfterFull = compoundingBase * Math.pow(1 + periodRate, fullPeriods);
-                const finalAmount = amountAfterFull + (amountAfterFull * periodRate * (remainingDays / periodDays));
-                phaseInterest = roundMoney(finalAmount - compoundingBase);
             }
 
             totalAccrued = roundMoney(totalAccrued + phaseInterest);
@@ -1076,17 +1118,33 @@ function renderLedger() {
     const asOfDateInput = document.getElementById('ledger-as-of-date');
     const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
     const ledger = calculateLedger(state.currentCustomerId, asOfDateStr);
-    
-    document.getElementById('summary-principal').textContent = formatCurrency(ledger.totalPrincipalRemaining);
-    document.getElementById('summary-interest').textContent = formatCurrency(ledger.totalAccruedInterest);
-    
-    const isCredit = ledger.netOutstanding < 0;
-    const netAmt = Math.abs(ledger.netOutstanding);
-    
-    const netEl = document.getElementById('summary-net');
-    if (netEl) {
-        netEl.textContent = formatCurrency(netAmt) + (isCredit ? ' (Cr)' : (netAmt > 0 ? ' (Dr)' : ''));
-        netEl.className = 'amount stat-net-amount';
+
+    if (state.currentLedgerSummary && typeof state.currentLedgerSummary.outstandingPrincipal === 'number') {
+        document.getElementById('summary-principal').textContent = formatCurrency(state.currentLedgerSummary.outstandingPrincipal);
+        document.getElementById('summary-interest').textContent = formatCurrency(state.currentLedgerSummary.accruedInterest);
+
+        const isCredit = (state.currentLedgerSummary.unallocatedCredit || 0) > 0 || (state.currentLedgerSummary.totalDue || 0) < 0;
+        const netAmt = (state.currentLedgerSummary.unallocatedCredit || 0) > 0
+            ? state.currentLedgerSummary.unallocatedCredit
+            : Math.abs(state.currentLedgerSummary.totalDue || 0);
+
+        const netEl = document.getElementById('summary-net');
+        if (netEl) {
+            netEl.textContent = formatCurrency(netAmt) + (isCredit ? ' (Cr)' : (netAmt > 0 ? ' (Dr)' : ''));
+            netEl.className = 'amount stat-net-amount';
+        }
+    } else {
+        document.getElementById('summary-principal').textContent = formatCurrency(ledger.totalPrincipalRemaining);
+        document.getElementById('summary-interest').textContent = formatCurrency(ledger.totalAccruedInterest);
+
+        const isCredit = ledger.netOutstanding < 0;
+        const netAmt = Math.abs(ledger.netOutstanding);
+
+        const netEl = document.getElementById('summary-net');
+        if (netEl) {
+            netEl.textContent = formatCurrency(netAmt) + (isCredit ? ' (Cr)' : (netAmt > 0 ? ' (Dr)' : ''));
+            netEl.className = 'amount stat-net-amount';
+        }
     }
 
     const listBody = document.getElementById('transaction-list-body');
@@ -3916,7 +3974,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                     : `${rawActiveRate}% monthly`;
 
                 if (principalDue > 0 && advanceBalance === 0) {
-                    const elapsedMonths = exactDays / 30;
+                    const elapsedMonths = calculateElapsedCalendarMonths(lastDate, txDate);
                     const newInterest = roundMoney(principalDue * (effectiveMonthlyRate / 100) * elapsedMonths);
                     accruedInterest = roundMoney(accruedInterest + newInterest);
                     breakdownLog.push({
@@ -3989,7 +4047,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                     : `${rawActiveRate}% monthly`;
 
                 if (principalDue > 0 && advanceBalance === 0) {
-                    const elapsedMonths = exactDays / 30;
+                    const elapsedMonths = calculateElapsedCalendarMonths(lastDate, asOfDate);
                     const newInterest = roundMoney(principalDue * (effectiveMonthlyRate / 100) * elapsedMonths);
                     accruedInterest = roundMoney(accruedInterest + newInterest);
                     breakdownLog.push({
