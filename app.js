@@ -1049,6 +1049,7 @@ function renderAnalytics() {
 
 async function openLedger(customerId) {
     state.currentCustomerId = customerId;
+    state.currentLedgerSummary = null;
     const customer = state.customers.find(c => c.id === customerId);
     if (customer) {
         const nameEl = document.getElementById('ledger-customer-name');
@@ -1061,7 +1062,14 @@ async function openLedger(customerId) {
     renderLedger();
     
     try {
-        const response = await LedgerAPI.getCustomerLedger(customerId);
+        const asOfDateInput = document.getElementById('ledger-as-of-date');
+        const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
+        const params = {};
+        if (asOfDateStr) {
+            params.calculationDate = asOfDateStr;
+        }
+
+        const response = await LedgerAPI.getCustomerLedger(customerId, params);
         
         if (response && Array.isArray(response.transactions)) {
             state.currentLedgerSummary = response.summary;
@@ -4112,7 +4120,7 @@ async function showInterestBreakdown(txnId = null) {
             const backendLedger = await LedgerAPI.getCustomerLedger(targetCustId, params);
             if (backendLedger) {
                 breakdownLog = backendLedger.breakdownLog || backendLedger.data?.breakdownLog;
-                totalInterestSum = backendLedger.totalAccruedInterest ?? backendLedger.summary?.accruedInterest ?? 0;
+                totalInterestSum = backendLedger.summary?.accruedInterest ?? backendLedger.totalAccruedInterest ?? 0;
             }
         }
     } catch (err) {
@@ -4121,7 +4129,8 @@ async function showInterestBreakdown(txnId = null) {
 
     if (!breakdownLog) {
         breakdownLog = computeLocalBreakdownLog(targetCustId, asOfDateStr);
-        totalInterestSum = breakdownLog.reduce((sum, item) => sum + (item.interestAccrued ?? item.interestGenerated ?? 0), 0);
+        const localLedger = calculateLedger(targetCustId, asOfDateStr);
+        totalInterestSum = localLedger.totalAccruedInterest;
     }
 
     totalInterestSum = roundMoney(totalInterestSum);
@@ -4135,7 +4144,7 @@ async function showInterestBreakdown(txnId = null) {
             </div>
             <div style="background: var(--surface-color); padding: 14px; border-radius: 10px; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
                 <span style="font-weight: 700; color: var(--text-primary);">Total Accrued Interest:</span>
-                <span class="amount text-success" style="font-size: 1.2rem; font-weight: 800;">₹0.00</span>
+                <span class="amount text-success" style="font-size: 1.2rem; font-weight: 800;">${formatCurrency(totalInterestSum)}</span>
             </div>
         `;
         return;
@@ -4213,7 +4222,10 @@ async function showInterestBreakdown(txnId = null) {
     container.innerHTML = html;
 }
 
-document.getElementById('ledger-as-of-date')?.addEventListener('change', renderLedger);
+document.getElementById('ledger-as-of-date')?.addEventListener('change', () => {
+    state.currentLedgerSummary = null;
+    renderLedger();
+});
 
 // ==========================================
 // BAD DEBTS & NPA (डूबत खाता) MODULE ENGINE
