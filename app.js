@@ -3989,6 +3989,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                         startDate: new Date(lastDate),
                         endDate: new Date(txDate),
                         daysElapsed: exactDays,
+                        elapsedMonths: roundMoney(elapsedMonths),
                         activePrincipal: principalDue,
                         interestGenerated: newInterest,
                         interestAccrued: newInterest,
@@ -4001,6 +4002,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                         startDate: new Date(lastDate),
                         endDate: new Date(txDate),
                         daysElapsed: exactDays,
+                        elapsedMonths: roundMoney(calculateElapsedCalendarMonths(lastDate, txDate)),
                         activePrincipal: 0,
                         interestGenerated: 0,
                         interestAccrued: 0,
@@ -4062,6 +4064,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                         startDate: new Date(lastDate),
                         endDate: new Date(asOfDate),
                         daysElapsed: exactDays,
+                        elapsedMonths: roundMoney(elapsedMonths),
                         activePrincipal: principalDue,
                         interestGenerated: newInterest,
                         interestAccrued: newInterest,
@@ -4074,6 +4077,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                         startDate: new Date(lastDate),
                         endDate: new Date(asOfDate),
                         daysElapsed: exactDays,
+                        elapsedMonths: roundMoney(calculateElapsedCalendarMonths(lastDate, asOfDate)),
                         activePrincipal: 0,
                         interestGenerated: 0,
                         interestAccrued: 0,
@@ -4181,6 +4185,8 @@ async function showInterestBreakdown(txnId = null) {
             const activePrincipal = phase.activePrincipal || 0;
             const interestGen = phase.interestAccrued !== undefined ? phase.interestAccrued : (phase.interestGenerated || 0);
             const rateLabel = typeof phase.rateApplied === 'number' ? `${phase.rateApplied}% monthly` : (phase.rateApplied || '2% monthly');
+            const elapsedMonthsVal = phase.elapsedMonths !== undefined ? phase.elapsedMonths : roundMoney(days / 30);
+            const monthsFormulaStr = elapsedMonthsVal === 1 ? '1 month' : `${elapsedMonthsVal} months`;
 
             html += `
                 <div class="calc-breakdown-card" style="border-left: 4px solid var(--primary-color, #3b82f6);">
@@ -4188,7 +4194,7 @@ async function showInterestBreakdown(txnId = null) {
                         <div>
                             <strong style="font-size: 0.95rem; color: var(--text-primary);">Phase ${index + 1}: ${startDateStr} → ${endDateStr}</strong>
                             <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
-                                Active Balance: ${formatCurrency(activePrincipal)} | Rate: ${rateLabel} | Duration: ${days} day${days === 1 ? '' : 's'}
+                                Active Balance: ${formatCurrency(activePrincipal)} | Rate: ${rateLabel} | Duration: ${days} day${days === 1 ? '' : 's'} (${monthsFormulaStr})
                             </div>
                         </div>
                         <span class="amt-debit" style="font-size: 1rem; font-weight: 700;">+${formatCurrency(interestGen)}</span>
@@ -4200,7 +4206,7 @@ async function showInterestBreakdown(txnId = null) {
                         </div>
                         <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
                             <span style="color: var(--text-secondary);">Calculation Formula:</span>
-                            <span>${formatCurrency(activePrincipal)} × ${rateLabel} × (${days}/30 months)</span>
+                            <span>${formatCurrency(activePrincipal)} × ${rateLabel} × (${monthsFormulaStr})</span>
                         </div>
                         <div style="display: flex; justify-content: space-between; font-weight: 700; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border-color);">
                             <span>Interest Accrued in Phase:</span>
