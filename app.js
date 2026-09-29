@@ -626,21 +626,26 @@ function calculateElapsedCalendarMonths(startDate, endDate) {
     }
 
     if (current < d2) {
-        const msDiff = d2.getTime() - current.getTime();
-        const remainingDays = msDiff / (1000 * 60 * 60 * 24);
+        const isSameDay = (current.getFullYear() === d2.getFullYear() && current.getMonth() === d2.getMonth() && current.getDate() === d2.getDate()) ||
+                          (current.getUTCFullYear() === d2.getUTCFullYear() && current.getUTCMonth() === d2.getUTCMonth() && current.getUTCDate() === d2.getUTCDate());
 
-        let nextYear = current.getFullYear();
-        let nextMonth = current.getMonth() + 1;
-        if (nextMonth > 11) {
-            nextYear += Math.floor(nextMonth / 12);
-            nextMonth = nextMonth % 12;
+        if (!isSameDay) {
+            const msDiff = d2.getTime() - current.getTime();
+            const remainingDays = msDiff / (1000 * 60 * 60 * 24);
+
+            let nextYear = current.getFullYear();
+            let nextMonth = current.getMonth() + 1;
+            if (nextMonth > 11) {
+                nextYear += Math.floor(nextMonth / 12);
+                nextMonth = nextMonth % 12;
+            }
+            const daysInNextMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
+            const targetDay = Math.min(anchorDay, daysInNextMonth);
+            const nextAnniversary = new Date(nextYear, nextMonth, targetDay, d1.getHours(), d1.getMinutes(), d1.getSeconds(), d1.getMilliseconds());
+
+            const spanDays = Math.max(1, (nextAnniversary.getTime() - current.getTime()) / (1000 * 60 * 60 * 24));
+            months += remainingDays / spanDays;
         }
-        const daysInNextMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
-        const targetDay = Math.min(anchorDay, daysInNextMonth);
-        const nextAnniversary = new Date(nextYear, nextMonth, targetDay, d1.getHours(), d1.getMinutes(), d1.getSeconds(), d1.getMilliseconds());
-
-        const spanDays = Math.max(1, (nextAnniversary.getTime() - current.getTime()) / (1000 * 60 * 60 * 24));
-        months += remainingDays / spanDays;
     }
 
     return months;
@@ -4048,8 +4053,11 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
     }
 
     if (asOfDate && !isNaN(asOfDate.getTime()) && lastDate !== null) {
-        if (asOfDate.getTime() > lastDate.getTime()) {
-            const exactDays = Math.max(0, Math.round((asOfDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)));
+        const targetAsOf = new Date(asOfDate.getTime());
+        targetAsOf.setHours(lastDate.getHours(), lastDate.getMinutes(), lastDate.getSeconds(), lastDate.getMilliseconds());
+
+        if (targetAsOf.getTime() > lastDate.getTime()) {
+            const exactDays = Math.max(0, Math.round((targetAsOf.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)));
             if (exactDays > 0) {
                 const effectiveMonthlyRate = activeIsYearly ? rawActiveRate / 12 : rawActiveRate;
                 const rateLabel = activeIsYearly 
@@ -4057,7 +4065,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                     : `${rawActiveRate}% monthly`;
 
                 if (principalDue > 0 && advanceBalance === 0) {
-                    const elapsedMonths = calculateElapsedCalendarMonths(lastDate, asOfDate);
+                    const elapsedMonths = calculateElapsedCalendarMonths(lastDate, targetAsOf);
                     const newInterest = roundMoney(principalDue * (effectiveMonthlyRate / 100) * elapsedMonths);
                     accruedInterest = roundMoney(accruedInterest + newInterest);
                     breakdownLog.push({
@@ -4077,7 +4085,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                         startDate: new Date(lastDate),
                         endDate: new Date(asOfDate),
                         daysElapsed: exactDays,
-                        elapsedMonths: roundMoney(calculateElapsedCalendarMonths(lastDate, asOfDate)),
+                        elapsedMonths: roundMoney(calculateElapsedCalendarMonths(lastDate, targetAsOf)),
                         activePrincipal: 0,
                         interestGenerated: 0,
                         interestAccrued: 0,
