@@ -2166,19 +2166,43 @@ document.getElementById('transaction-form').onsubmit = async (e) => {
 
 // --- INTEGRATIONS (WhatsApp & PDF) ---
 document.getElementById('btn-whatsapp').onclick = () => {
-    if(!state.currentCustomerId) return;
+    if (!state.currentCustomerId) return;
     const customer = state.customers.find(c => c.id === state.currentCustomerId);
-    const ledger = calculateLedger(state.currentCustomerId);
-    
-    if (ledger.totalNet <= 0) {
+    if (!customer) return;
+
+    const asOfDateInput = document.getElementById('ledger-as-of-date');
+    const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
+
+    let netBalance = 0;
+    if (state.currentLedgerSummary && state.currentLedgerSummary.netOutstanding !== undefined) {
+        netBalance = state.currentLedgerSummary.netOutstanding;
+    } else {
+        const ledger = calculateLedger(state.currentCustomerId, asOfDateStr);
+        netBalance = ledger.totalNet !== undefined ? ledger.totalNet : (ledger.netOutstanding || 0);
+    }
+
+    if (netBalance <= 0) {
         alert("This customer does not owe any money.");
         return;
     }
 
-    const amt = formatCurrency(Math.abs(ledger.totalNet));
-    const msg = `Namaste ${customer.name},\n\nThis is a friendly reminder from Mohit Store. Your current outstanding ledger balance is *${amt}*.\n\nPlease review and arrange for payment. Thank you!`;
-    
-    const waUrl = `https://wa.me/91${customer.phoneNumber || ''}?text=${encodeURIComponent(msg)}`;
+    let rawPhone = customer.phoneNumber || customer.phone || '';
+    let cleanPhone = String(rawPhone).replace(/\D/g, '');
+    if (!cleanPhone) {
+        alert("Customer does not have a valid phone number.");
+        return;
+    }
+
+    if (cleanPhone.length === 10) {
+        cleanPhone = '91' + cleanPhone;
+    } else if (cleanPhone.length > 10 && !cleanPhone.startsWith('91')) {
+        cleanPhone = '91' + cleanPhone.replace(/^0+/, '');
+    }
+
+    const formattedNet = formatCurrency(netBalance).replace('₹', '').trim();
+    const msg = `Namaste ${customer.name}, your current pending ledger balance is ₹${formattedNet}. Please settle it at your earliest convenience.`;
+
+    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
     window.open(waUrl, '_blank');
 };
 
