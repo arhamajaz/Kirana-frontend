@@ -3997,7 +3997,21 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
     const breakdownLog = [];
     let lastDate = null;
     let rawActiveRate = defaultRate;
-    let activeIsYearly = rawActiveRate > 5;
+
+    const isYearlyUnit = (unit, isAnnual) => {
+        if (isAnnual === true) return true;
+        if (!unit) return false;
+        const u = String(unit).toLowerCase().trim();
+        return u === 'yearly' || u === 'annual' || u === 'annually' || u === 'year' || u === 'yr' || u === 'p.a.' || u === 'pa';
+    };
+
+    const isMonthlyUnit = (unit) => {
+        if (!unit) return false;
+        const u = String(unit).toLowerCase().trim();
+        return u === 'monthly' || u === 'month' || u === 'mo';
+    };
+
+    let activeIsYearly = isYearlyUnit(rateUnit, false);
 
     for (const tx of txns) {
         const txDate = new Date(tx.date);
@@ -4008,7 +4022,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
             if (exactDays > 0) {
                 const effectiveMonthlyRate = activeIsYearly ? rawActiveRate / 12 : rawActiveRate;
                 const rateLabel = activeIsYearly 
-                    ? `${roundMoney(effectiveMonthlyRate)}% monthly (${rawActiveRate}% yearly)` 
+                    ? `${rawActiveRate}% yearly` 
                     : `${rawActiveRate}% monthly`;
 
                 if (principalDue > 0 && advanceBalance === 0) {
@@ -4047,9 +4061,15 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
         const txRate = tx.interestRate ?? tx.rate;
         if (txRate !== undefined && txRate !== null && !isNaN(Number(txRate))) {
             rawActiveRate = Number(txRate);
-            if (tx.rateUnit === 'yearly' || tx.rateUnit === 'annual' || tx.isAnnual || rawActiveRate > 5) {
-                activeIsYearly = tx.rateUnit !== 'monthly';
-            } else {
+            if (isYearlyUnit(tx.rateUnit, tx.isAnnual)) {
+                activeIsYearly = true;
+            } else if (isMonthlyUnit(tx.rateUnit)) {
+                activeIsYearly = false;
+            }
+        } else if (tx.rateUnit !== undefined || tx.isAnnual !== undefined) {
+            if (isYearlyUnit(tx.rateUnit, tx.isAnnual)) {
+                activeIsYearly = true;
+            } else if (isMonthlyUnit(tx.rateUnit)) {
                 activeIsYearly = false;
             }
         }
@@ -4063,9 +4083,19 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
             amount = roundMoney(amount - deduction);
             principalDue = roundMoney(principalDue + amount);
         } else if (type === 'CREDIT') {
-            const intPayment = roundMoney(Math.min(amount, accruedInterest));
+            let intPayment = roundMoney(Math.min(amount, accruedInterest));
             accruedInterest = roundMoney(accruedInterest - intPayment);
             amount = roundMoney(amount - intPayment);
+
+            let remainingIntToDeduct = intPayment;
+            for (let i = breakdownLog.length - 1; i >= 0 && remainingIntToDeduct > 0; i--) {
+                const phase = breakdownLog[i];
+                if (phase.interestAccrued > 0) {
+                    const deduct = roundMoney(Math.min(phase.interestAccrued, remainingIntToDeduct));
+                    phase.interestAccrued = roundMoney(phase.interestAccrued - deduct);
+                    remainingIntToDeduct = roundMoney(remainingIntToDeduct - deduct);
+                }
+            }
 
             const prinPayment = roundMoney(Math.min(amount, principalDue));
             principalDue = roundMoney(principalDue - prinPayment);
@@ -4086,7 +4116,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
             if (exactDays > 0) {
                 const effectiveMonthlyRate = activeIsYearly ? rawActiveRate / 12 : rawActiveRate;
                 const rateLabel = activeIsYearly 
-                    ? `${roundMoney(effectiveMonthlyRate)}% monthly (${rawActiveRate}% yearly)` 
+                    ? `${rawActiveRate}% yearly` 
                     : `${rawActiveRate}% monthly`;
 
                 if (principalDue > 0 && advanceBalance === 0) {
@@ -4108,7 +4138,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
                 } else if (advanceBalance > 0) {
                     breakdownLog.push({
                         startDate: new Date(lastDate),
-                        endDate: new Date(asOfDate),
+                        endDate: new Date(targetAsOf),
                         daysElapsed: exactDays,
                         elapsedMonths: roundMoney(calculateElapsedCalendarMonths(lastDate, targetAsOf)),
                         activePrincipal: 0,
