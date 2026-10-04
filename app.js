@@ -3971,6 +3971,8 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
     const customer = (state.customers || []).find(c => c.id === customerId);
     const rawRateVal = customer?.lendingRate;
     const defaultRate = (rawRateVal !== undefined && rawRateVal !== null && !isNaN(parseFloat(rawRateVal))) ? parseFloat(rawRateVal) : 2;
+    const defaultRateUnit = customer?.rateUnit || customer?.rate_unit;
+    const defaultIsAnnual = customer?.isAnnual || customer?.is_annual;
 
     const asOfDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
     asOfDate.setHours(23, 59, 59, 999);
@@ -4011,7 +4013,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
         return u === 'monthly' || u === 'month' || u === 'mo';
     };
 
-    let activeIsYearly = isYearlyUnit(rateUnit, false);
+    let activeIsYearly = isYearlyUnit(defaultRateUnit, defaultIsAnnual);
 
     for (const tx of txns) {
         const txDate = new Date(tx.date);
@@ -4196,11 +4198,11 @@ async function showInterestBreakdown(txnId = null) {
 
     if (!breakdownLog) {
         breakdownLog = computeLocalBreakdownLog(targetCustId, asOfDateStr);
-        const localLedger = calculateLedger(targetCustId, asOfDateStr);
-        totalInterestSum = localLedger.totalAccruedInterest;
     }
 
-    totalInterestSum = roundMoney(totalInterestSum);
+    totalInterestSum = roundMoney(
+        breakdownLog.reduce((sum, phase) => sum + (phase.interestAccrued || 0), 0)
+    );
 
     if (!breakdownLog || breakdownLog.length === 0) {
         container.innerHTML = `
