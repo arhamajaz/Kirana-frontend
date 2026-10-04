@@ -933,8 +933,8 @@ function calculateLedger(customerId, asOfDateStr = null) {
     updateAllSilosInterestUpTo(asOfDate);
 
     let totalAccruedInterest = roundMoney(debitSilos.reduce((sum, s) => roundMoney(sum + s.accruedInterest), 0));
-    // Directive 1: Displayed Principal = rawPrincipal, Outstanding Balance = rawPrincipal + Displayed Interest
-    const netOutstanding = roundMoney(rawPrincipal + totalAccruedInterest);
+    const totalSiloPrincipal = roundMoney(debitSilos.reduce((sum, s) => roundMoney(sum + s.principalRemaining), 0) - excessCredit);
+    const netOutstanding = roundMoney(totalSiloPrincipal + totalAccruedInterest);
 
     let status = 'active';
     if (netOutstanding > 0 && txns.length > 0) {
@@ -947,11 +947,12 @@ function calculateLedger(customerId, asOfDateStr = null) {
     const result = {
         rawPrincipal,
         netOutstanding,
-        totalPrincipalRemaining: rawPrincipal,
+        totalPrincipalRemaining: totalSiloPrincipal,
         totalAccruedInterest,
-        principal: rawPrincipal,
+        principal: totalSiloPrincipal,
         accruedInterest: totalAccruedInterest,
         totalNet: netOutstanding,
+        netOutstanding,
         isDebt: netOutstanding > 0,
         status,
         silos: debitSilos,
