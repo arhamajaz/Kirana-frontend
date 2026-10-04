@@ -112,13 +112,13 @@ const path = require('path');
             },
             {
                 id: 8,
-                name: 'Multi-Phase Compound: 10k @ 12% Yr Compound (3m: 303.01) + 6% Yr Compound (3m: 150.75) -> 453.76',
+                name: 'Multi-Phase Compound: 10k @ 12% Yr Compound (3m: 303.01) + 6% Yr Compound (3m: 155.32) -> 458.33',
                 rate: 12,
                 rateUnit: 'yearly',
                 interestType: 'compound',
                 txns: [{ type: 'DEBIT', amount: 10000, date: '2026-01-01', interestRate: 12, rateUnit: 'yearly', interestType: 'compound' }, { type: 'DEBIT', amount: 0, date: '2026-04-01', interestRate: 6, rateUnit: 'yearly', interestType: 'compound' }],
                 asOfDate: '2026-07-01',
-                expectedInterest: 453.76
+                expectedInterest: 458.33
             },
             {
                 id: 9,
@@ -149,6 +149,19 @@ const path = require('path');
                 txns: [{ type: 'DEBIT', amount: 0.01, date: '2026-01-01', interestRate: 2, rateUnit: 'monthly', interestType: 'compound' }],
                 asOfDate: '2026-03-01',
                 expectedInterest: 0.00
+            },
+            {
+                id: 12,
+                name: '2-Phase Capitalization Benchmark: 50k (4m @ 12% yr compound) + 100k debit (2m @ 12% yr compound) -> Exactly ₹5,086.01',
+                rate: 12,
+                rateUnit: 'yearly',
+                interestType: 'compound',
+                txns: [
+                    { type: 'DEBIT', amount: 50000, date: '2026-01-01', interestRate: 12, rateUnit: 'yearly', interestType: 'compound' },
+                    { type: 'DEBIT', amount: 100000, date: '2026-05-01', interestRate: 12, rateUnit: 'yearly', interestType: 'compound' }
+                ],
+                asOfDate: '2026-07-01',
+                expectedInterest: 5086.01
             }
         ];
 
