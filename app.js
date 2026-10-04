@@ -932,7 +932,8 @@ function calculateLedger(customerId, asOfDateStr = null) {
     // Final Accrual up to As-Of Date
     updateAllSilosInterestUpTo(asOfDate);
 
-    let totalAccruedInterest = roundMoney(debitSilos.reduce((sum, s) => roundMoney(sum + s.accruedInterest), 0));
+    const breakdownLog = computeLocalBreakdownLog(customerId, asOfDateStr);
+    let totalAccruedInterest = Array.isArray(breakdownLog) ? roundMoney(breakdownLog.reduce((sum, phase) => roundMoney(sum + (phase.interestAccrued || 0)), 0)) : roundMoney(debitSilos.reduce((sum, s) => roundMoney(sum + s.accruedInterest), 0));
     const totalSiloPrincipal = roundMoney(debitSilos.reduce((sum, s) => roundMoney(sum + s.principalRemaining), 0) - excessCredit);
     const netOutstanding = roundMoney(totalSiloPrincipal + totalAccruedInterest);
 
@@ -1133,7 +1134,7 @@ function renderLedger() {
     const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
     const ledger = calculateLedger(state.currentCustomerId, asOfDateStr);
 
-    if (state.currentLedgerSummary && typeof state.currentLedgerSummary.outstandingPrincipal === 'number') {
+    if (!state.isTestMode && state.currentLedgerSummary && typeof state.currentLedgerSummary.outstandingPrincipal === 'number') {
         document.getElementById('summary-principal').textContent = formatCurrency(state.currentLedgerSummary.outstandingPrincipal);
         document.getElementById('summary-interest').textContent = formatCurrency(state.currentLedgerSummary.accruedInterest);
 
@@ -1845,7 +1846,7 @@ function getTxnInterestPhases(txn, defaultRate = 12, customer = null) {
     if (txn && Array.isArray(txn.interestPhases) && txn.interestPhases.length > 0) {
         return txn.interestPhases;
     }
-    const legacyRate = typeof txn?.interestRate === 'number' ? txn.interestRate : (defaultRate || 12);
+    const legacyRate = typeof txn?.interestRate === 'number' ? txn.interestRate : (defaultRate !== undefined && defaultRate !== null ? defaultRate : 12);
     const iType = (txn?.interestType || customer?.defaultInterestType || customer?.interestType || 'simple').toLowerCase();
     const freq = (txn?.compoundingFrequency || customer?.compoundingFrequency || customer?.compoundFrequency || 'monthly').toLowerCase();
 
@@ -3971,8 +3972,8 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
     const customer = (state.customers || []).find(c => c.id === customerId);
     const rawRateVal = customer?.lendingRate;
     const defaultRate = (rawRateVal !== undefined && rawRateVal !== null && !isNaN(parseFloat(rawRateVal))) ? parseFloat(rawRateVal) : 2;
-    const defaultRateUnit = customer?.rateUnit || customer?.rate_unit;
-    const defaultIsAnnual = customer?.isAnnual || customer?.is_annual;
+    const defaultRateUnit = customer?.rateUnit || customer?.rate_unit || 'yearly';
+    const defaultIsAnnual = customer?.isAnnual ?? customer?.is_annual;
 
     const asOfDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
     asOfDate.setHours(23, 59, 59, 999);
@@ -4002,9 +4003,10 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
 
     const isYearlyUnit = (unit, isAnnual) => {
         if (isAnnual === true) return true;
-        if (!unit) return false;
+        if (isAnnual === false) return false;
+        if (!unit) return true; // Default to yearly rate if unassigned (aligning with lendingRate p.a. standard)
         const u = String(unit).toLowerCase().trim();
-        return u === 'yearly' || u === 'annual' || u === 'annually' || u === 'year' || u === 'yr' || u === 'p.a.' || u === 'pa';
+        return u !== 'monthly' && u !== 'month' && u !== 'mo';
     };
 
     const isMonthlyUnit = (unit) => {
@@ -4063,17 +4065,11 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
         const txRate = tx.interestRate ?? tx.rate;
         if (txRate !== undefined && txRate !== null && !isNaN(Number(txRate))) {
             rawActiveRate = Number(txRate);
-            if (isYearlyUnit(tx.rateUnit, tx.isAnnual)) {
-                activeIsYearly = true;
-            } else if (isMonthlyUnit(tx.rateUnit)) {
-                activeIsYearly = false;
+            if (tx.rateUnit !== undefined || tx.isAnnual !== undefined) {
+                activeIsYearly = isYearlyUnit(tx.rateUnit, tx.isAnnual);
             }
         } else if (tx.rateUnit !== undefined || tx.isAnnual !== undefined) {
-            if (isYearlyUnit(tx.rateUnit, tx.isAnnual)) {
-                activeIsYearly = true;
-            } else if (isMonthlyUnit(tx.rateUnit)) {
-                activeIsYearly = false;
-            }
+            activeIsYearly = isYearlyUnit(tx.rateUnit, tx.isAnnual);
         }
 
         let amount = roundMoney(Number(tx.amount) || 0);
