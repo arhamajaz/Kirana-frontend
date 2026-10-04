@@ -3974,6 +3974,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
     const defaultRate = (rawRateVal !== undefined && rawRateVal !== null && !isNaN(parseFloat(rawRateVal))) ? parseFloat(rawRateVal) : 2;
     const defaultRateUnit = customer?.rateUnit || customer?.rate_unit || 'yearly';
     const defaultIsAnnual = customer?.isAnnual ?? customer?.is_annual;
+    const defaultInterestType = (customer?.interestType || customer?.defaultInterestType || customer?.interest_type || 'simple').toLowerCase();
 
     const asOfDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
     asOfDate.setHours(23, 59, 59, 999);
@@ -4016,6 +4017,7 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
     };
 
     let activeIsYearly = isYearlyUnit(defaultRateUnit, defaultIsAnnual);
+    let activeInterestType = defaultInterestType;
 
     for (const tx of txns) {
         const txDate = new Date(tx.date);
@@ -4025,13 +4027,16 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
             const exactDays = Math.max(0, Math.round((txDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)));
             if (exactDays > 0) {
                 const effectiveMonthlyRate = activeIsYearly ? rawActiveRate / 12 : rawActiveRate;
+                const isCompound = activeInterestType === 'compound';
                 const rateLabel = activeIsYearly 
-                    ? `${rawActiveRate}% yearly` 
-                    : `${rawActiveRate}% monthly`;
+                    ? `${rawActiveRate}% yearly${isCompound ? ' (Compound)' : ''}` 
+                    : `${rawActiveRate}% monthly${isCompound ? ' (Compound)' : ''}`;
 
                 if (principalDue > 0 && advanceBalance === 0) {
                     const elapsedMonths = calculateElapsedCalendarMonths(lastDate, txDate);
-                    const newInterest = roundMoney(principalDue * (effectiveMonthlyRate / 100) * elapsedMonths);
+                    const newInterest = isCompound
+                        ? roundMoney(principalDue * (Math.pow(1 + (effectiveMonthlyRate / 100), elapsedMonths) - 1))
+                        : roundMoney(principalDue * (effectiveMonthlyRate / 100) * elapsedMonths);
                     accruedInterest = roundMoney(accruedInterest + newInterest);
                     breakdownLog.push({
                         startDate: new Date(lastDate),
@@ -4070,6 +4075,10 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
             }
         } else if (tx.rateUnit !== undefined || tx.isAnnual !== undefined) {
             activeIsYearly = isYearlyUnit(tx.rateUnit, tx.isAnnual);
+        }
+
+        if (tx.interestType || tx.interest_type) {
+            activeInterestType = String(tx.interestType || tx.interest_type).toLowerCase();
         }
 
         let amount = roundMoney(Number(tx.amount) || 0);
@@ -4113,13 +4122,16 @@ function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
             const exactDays = Math.max(0, Math.round((targetAsOf.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)));
             if (exactDays > 0) {
                 const effectiveMonthlyRate = activeIsYearly ? rawActiveRate / 12 : rawActiveRate;
+                const isCompound = activeInterestType === 'compound';
                 const rateLabel = activeIsYearly 
-                    ? `${rawActiveRate}% yearly` 
-                    : `${rawActiveRate}% monthly`;
+                    ? `${rawActiveRate}% yearly${isCompound ? ' (Compound)' : ''}` 
+                    : `${rawActiveRate}% monthly${isCompound ? ' (Compound)' : ''}`;
 
                 if (principalDue > 0 && advanceBalance === 0) {
                     const elapsedMonths = calculateElapsedCalendarMonths(lastDate, targetAsOf);
-                    const newInterest = roundMoney(principalDue * (effectiveMonthlyRate / 100) * elapsedMonths);
+                    const newInterest = isCompound
+                        ? roundMoney(principalDue * (Math.pow(1 + (effectiveMonthlyRate / 100), elapsedMonths) - 1))
+                        : roundMoney(principalDue * (effectiveMonthlyRate / 100) * elapsedMonths);
                     accruedInterest = roundMoney(accruedInterest + newInterest);
                     breakdownLog.push({
                         startDate: new Date(lastDate),
