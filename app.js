@@ -4188,7 +4188,7 @@ async function showInterestBreakdown(txnId = null) {
     toggleModal('interest-breakdown-modal', true);
 
     let breakdownLog = null;
-    let totalInterestSum = 0;
+    let totalInterestSum = null;
 
     try {
         if (state.isAuthenticated && LedgerAPI.getToken() && !state.isTestMode) {
@@ -4198,8 +4198,9 @@ async function showInterestBreakdown(txnId = null) {
             }
             const backendLedger = await LedgerAPI.getCustomerLedger(targetCustId, params);
             if (backendLedger) {
-                breakdownLog = backendLedger.breakdownLog || backendLedger.data?.breakdownLog;
-                totalInterestSum = backendLedger.summary?.accruedInterest ?? backendLedger.totalAccruedInterest ?? 0;
+                const dataObj = backendLedger.data || backendLedger;
+                breakdownLog = dataObj.breakdownLog || backendLedger.breakdownLog;
+                totalInterestSum = dataObj.summary?.accruedInterest ?? dataObj.totalAccruedInterest ?? backendLedger.summary?.accruedInterest ?? backendLedger.totalAccruedInterest;
             }
         }
     } catch (err) {
@@ -4210,9 +4211,11 @@ async function showInterestBreakdown(txnId = null) {
         breakdownLog = computeLocalBreakdownLog(targetCustId, asOfDateStr);
     }
 
-    totalInterestSum = roundMoney(
-        breakdownLog.reduce((sum, phase) => sum + (phase.interestAccrued || 0), 0)
-    );
+    if (totalInterestSum === null || totalInterestSum === undefined) {
+        totalInterestSum = roundMoney(
+            breakdownLog.reduce((sum, phase) => sum + (phase.interestAccrued !== undefined ? phase.interestAccrued : (phase.interestGenerated || 0)), 0)
+        );
+    }
 
     if (!breakdownLog || breakdownLog.length === 0) {
         container.innerHTML = `
@@ -4258,7 +4261,7 @@ async function showInterestBreakdown(txnId = null) {
             `;
         } else {
             const activePrincipal = phase.activePrincipal || 0;
-            const interestGen = phase.interestAccrued !== undefined ? phase.interestAccrued : (phase.interestGenerated || 0);
+            const interestGen = phase.interestGenerated !== undefined ? phase.interestGenerated : (phase.interestAccrued || 0);
             const rateLabel = typeof phase.rateApplied === 'number' ? `${phase.rateApplied}% monthly` : (phase.rateApplied || '2% monthly');
             const elapsedMonthsVal = phase.elapsedMonths !== undefined ? phase.elapsedMonths : roundMoney(days / 30);
             const monthsFormulaStr = elapsedMonthsVal === 1 ? '1 month' : `${elapsedMonthsVal} months`;

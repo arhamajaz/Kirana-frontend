@@ -1,0 +1,23 @@
+{
+  "name": "kirana-ledger",
+  "version": "1.0.0",
+  "main": "api.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arhamajaz/Kirana-frontend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/arhamajaz/Kirana-frontend/issues"
+  },
+  "homepage": "https://github.com/arhamajaz/Kirana-frontend#readme",
+  "description": "",
+  "dependencies": {
+    "puppeteer": "^25.12.0"
+  }
+}

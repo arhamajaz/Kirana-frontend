@@ -1,5 +1,6 @@
 # Ignore backend repository subfolder inside frontend repo
 backend/
+node_modules/
 
 # OS and IDE files
 .DS_Store
@@ -7,3 +8,4 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
