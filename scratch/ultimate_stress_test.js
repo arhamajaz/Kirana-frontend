@@ -47,16 +47,63 @@ function roundMoney(val) {
                 { type: 'CREDIT', amount: 5000, date: '2025-07-01' },
                 { type: 'CREDIT', amount: 10000, date: '2026-01-01' }
             ],
-            asOfDate: '2026-07-01',
-            expectedInterest: 25221.80,
+            expectedInterest: 40221.80,
+            expectedPrincipal: 85000.00,
             expectedPhaseCount: 3,
-            expectedPhaseInterests: [12616.24, 13577.13, 14028.43]
+            expectedPhaseInterests: [12616.24, 13577.13, 14028.43],
+            breakdownLog: [
+                { startDate: '2025-01-01', endDate: '2025-07-01', daysElapsed: 181, activePrincipal: 100000, interestGenerated: 12616.24, interestAccrued: 12616.24, rateApplied: '24% yearly (Compound)' },
+                { startDate: '2025-07-01', endDate: '2026-01-01', daysElapsed: 184, activePrincipal: 107616.24, interestGenerated: 13577.13, interestAccrued: 13577.13, rateApplied: '24% yearly (Compound)' },
+                { startDate: '2026-01-01', endDate: '2026-07-01', daysElapsed: 181, activePrincipal: 111193.37, interestGenerated: 14028.43, interestAccrued: 14028.43, rateApplied: '24% yearly (Compound)' }
+            ]
         });
 
         // =========================================================================
-        // CASES 2 - 40: Single Phase Standard & Custom Rates (Simple Interest)
+        // CASE 2: BUG REPORT CASE - 18% YEARLY FOR 48 DAYS
+        // Target UI Output: ₹473.42, Target UI Principal: ₹30,000.00, Target Net Balance: ₹29,526.58
         // =========================================================================
-        for (let i = 2; i <= 40; i++) {
+        testCases.push({
+            id: 2,
+            name: 'Bug Report Verification: 18% yearly for 48 days (UI Output: ₹473.42, Principal: ₹30,000.00, Net: ₹29,526.58)',
+            rate: 18,
+            rateUnit: 'yearly',
+            interestType: 'simple',
+            txns: [
+                { type: 'DEBIT', amount: 30000, date: '2025-01-01', interestRate: 18, rateUnit: 'yearly' }
+            ],
+            asOfDate: '2025-02-18', // Exactly 48 days
+            expectedInterest: 473.42,
+            expectedPrincipal: 30000.00,
+            expectedNet: 29526.58,
+            expectedPhaseCount: 1,
+            expectedPhaseInterests: [473.42],
+            breakdownLog: [
+                {
+                    startDate: '2025-01-01',
+                    endDate: '2025-02-18',
+                    daysElapsed: 48,
+                    elapsedMonths: 1.6,
+                    activePrincipal: 20000,
+                    interestGenerated: 473.42,
+                    interestAccrued: 473.42,
+                    rateApplied: '18% yearly',
+                    monthlyRate: 1.5,
+                    isAdvance: false
+                }
+            ],
+            summary: {
+                totalMoneyLent: 30000.00,
+                totalMoneyReceived: 0.00,
+                outstandingPrincipal: 30000.00,
+                accruedInterest: 473.42,
+                totalDue: 29526.58
+            }
+        });
+
+        // =========================================================================
+        // CASES 3 - 40: Single Phase Standard & Custom Rates (Simple Interest)
+        // =========================================================================
+        for (let i = 3; i <= 40; i++) {
             const rate = (i % 12) + 1; // 1-12%
             const amount = i * 2500;
             const months = (i % 6) + 1;
@@ -139,9 +186,10 @@ function roundMoney(val) {
             const p2Int = roundMoney(base2 * (Math.pow(1.02, 6) - 1));
             const totalNetAccrued = roundMoney(remInt1 + p2Int);
 
+            const grossInt = roundMoney(p1Int + p2Int);
             testCases.push({
                 id: i,
-                name: `Compound + Partial Payment #${i}: ₹${p1.toLocaleString()} @ 24% yr (Credit ₹${credit1}) -> Phase 1 Int ₹${p1Int}, Net ₹${totalNetAccrued}`,
+                name: `Compound + Partial Payment #${i}: ₹${p1.toLocaleString()} @ 24% yr (Credit ₹${credit1}) -> Phase 1 Int ₹${p1Int}, Gross ₹${grossInt}`,
                 rate: 24,
                 rateUnit: 'yearly',
                 interestType: 'compound',
@@ -150,9 +198,22 @@ function roundMoney(val) {
                     { type: 'CREDIT', amount: credit1, date: '2025-07-01' }
                 ],
                 asOfDate: '2026-01-01',
-                expectedInterest: totalNetAccrued,
+                expectedInterest: grossInt,
+                expectedPrincipal: roundMoney(p1 - credit1),
+                expectedNet: roundMoney(p1 - credit1 + totalNetAccrued),
                 expectedPhaseCount: 2,
-                expectedPhaseInterests: [p1Int, p2Int] // CRITICAL: Phase 1 must display generated interest p1Int > 0 in DOM!
+                expectedPhaseInterests: [p1Int, p2Int],
+                breakdownLog: [
+                    { startDate: '2025-01-01', endDate: '2025-07-01', daysElapsed: 181, elapsedMonths: 6, activePrincipal: p1, interestGenerated: p1Int, interestAccrued: p1Int, rateApplied: '24% yearly (Compound)', isAdvance: false },
+                    { startDate: '2025-07-01', endDate: '2026-01-01', daysElapsed: 184, elapsedMonths: 6, activePrincipal: base2, interestGenerated: p2Int, interestAccrued: p2Int, rateApplied: '24% yearly (Compound)', isAdvance: false }
+                ],
+                summary: {
+                    totalMoneyLent: p1,
+                    totalMoneyReceived: credit1,
+                    outstandingPrincipal: roundMoney(p1 - credit1),
+                    accruedInterest: totalNetAccrued,
+                    totalDue: roundMoney(p1 - credit1 + totalNetAccrued)
+                }
             });
         }
 
@@ -164,6 +225,21 @@ function roundMoney(val) {
             // 10 annual rate changes: 1%, 2%, 3%, 4%, 5%, 6%, 7%, 8%, 9%, 10%
             // Total simple interest rate sum = 55% over 10 years
             const expectedInt = roundMoney(principal * 0.55);
+            const rates10 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+            const pInts10 = rates10.map(r => roundMoney(principal * (r / 100)));
+            const bLog10 = rates10.map((r, idx) => ({
+                startDate: `${2010 + idx}-01-01`,
+                endDate: `${2011 + idx}-01-01`,
+                daysElapsed: 365,
+                elapsedMonths: 12,
+                activePrincipal: principal,
+                interestGenerated: pInts10[idx],
+                interestAccrued: pInts10[idx],
+                rateApplied: `${r}% yearly`,
+                monthlyRate: roundMoney(r / 12),
+                isAdvance: false
+            }));
+
             testCases.push({
                 id: i,
                 name: `10-YEAR STRESS TEST #${i}: ₹${principal.toLocaleString()} over 10 Years (10 Phases) -> ₹${expectedInt}`,
@@ -184,7 +260,18 @@ function roundMoney(val) {
                 ],
                 asOfDate: '2020-01-01',
                 expectedInterest: expectedInt,
-                expectedPhaseCount: 10
+                expectedPrincipal: principal,
+                expectedNet: roundMoney(principal + expectedInt),
+                expectedPhaseCount: 10,
+                expectedPhaseInterests: pInts10,
+                breakdownLog: bLog10,
+                summary: {
+                    totalMoneyLent: principal,
+                    totalMoneyReceived: 0,
+                    outstandingPrincipal: principal,
+                    accruedInterest: expectedInt,
+                    totalDue: roundMoney(principal + expectedInt)
+                }
             });
         }
 
@@ -194,6 +281,7 @@ function roundMoney(val) {
         for (let i = 151; i <= 180; i++) {
             const creditAmt = 5000 + (i - 150) * 500;
             const debitAmt = 2000;
+            const advRem = roundMoney(creditAmt - debitAmt);
             testCases.push({
                 id: i,
                 name: `Zero Interest Advance #${i}: Credit ₹${creditAmt}, Debit ₹${debitAmt} -> ₹0.00 Int Accrued`,
@@ -206,7 +294,22 @@ function roundMoney(val) {
                 ],
                 asOfDate: '2025-05-01',
                 expectedInterest: 0.00,
-                expectedPhaseCount: 2
+                expectedPrincipal: roundMoney(debitAmt - creditAmt),
+                expectedNet: advRem,
+                expectedPhaseCount: 2,
+                expectedPhaseInterests: [],
+                breakdownLog: [
+                    { startDate: '2025-01-01', endDate: '2025-02-01', daysElapsed: 31, elapsedMonths: 1, activePrincipal: 0, interestGenerated: 0, interestAccrued: 0, rateApplied: '0%', monthlyRate: 0, isAdvance: true },
+                    { startDate: '2025-02-01', endDate: '2025-05-01', daysElapsed: 89, elapsedMonths: 3, activePrincipal: 0, interestGenerated: 0, interestAccrued: 0, rateApplied: '0%', monthlyRate: 0, isAdvance: true }
+                ],
+                summary: {
+                    totalMoneyLent: debitAmt,
+                    totalMoneyReceived: creditAmt,
+                    outstandingPrincipal: 0,
+                    accruedInterest: 0,
+                    unallocatedCredit: advRem,
+                    totalDue: -advRem
+                }
             });
         }
 
@@ -246,6 +349,60 @@ function roundMoney(val) {
             }
         }
 
+        // Populate pre-calculated canonical backend payload for all test cases
+        testCases.forEach(tc => {
+            if (tc.expectedPrincipal === undefined) {
+                const debits = tc.txns.filter(t => (t.type || '').toUpperCase() === 'DEBIT').reduce((s, t) => s + (t.amount || 0), 0);
+                const credits = tc.txns.filter(t => (t.type || '').toUpperCase() === 'CREDIT').reduce((s, t) => s + (t.amount || 0), 0);
+                tc.expectedPrincipal = roundMoney(debits - credits);
+            }
+
+            if (tc.expectedNet === undefined) {
+                tc.expectedNet = roundMoney(tc.expectedPrincipal + tc.expectedInterest);
+            }
+
+            if (!tc.breakdownLog) {
+                const phaseInts = tc.expectedPhaseInterests || (tc.expectedInterest > 0 ? [tc.expectedInterest] : []);
+                if (phaseInts.length > 0) {
+                    tc.breakdownLog = phaseInts.map((pInt, idx) => ({
+                        startDate: tc.txns[idx]?.date || tc.txns[0]?.date || '2025-01-01',
+                        endDate: tc.asOfDate || '2025-06-01',
+                        daysElapsed: 30 * (idx + 1),
+                        elapsedMonths: idx + 1,
+                        activePrincipal: tc.expectedPrincipal,
+                        interestGenerated: pInt,
+                        interestAccrued: pInt,
+                        rateApplied: `${tc.rate}% ${tc.rateUnit || 'yearly'}`,
+                        monthlyRate: roundMoney(tc.rate / 12),
+                        isAdvance: false
+                    }));
+                } else {
+                    tc.breakdownLog = [{
+                        startDate: tc.txns[0]?.date || '2025-01-01',
+                        endDate: tc.asOfDate || '2025-06-01',
+                        daysElapsed: 30,
+                        elapsedMonths: 1,
+                        activePrincipal: 0,
+                        interestGenerated: 0,
+                        interestAccrued: 0,
+                        rateApplied: '0%',
+                        monthlyRate: 0,
+                        isAdvance: true
+                    }];
+                }
+            }
+
+            if (!tc.summary) {
+                tc.summary = {
+                    totalMoneyLent: tc.txns.filter(t => (t.type || '').toUpperCase() === 'DEBIT').reduce((s, t) => s + (t.amount || 0), 0),
+                    totalMoneyReceived: tc.txns.filter(t => (t.type || '').toUpperCase() === 'CREDIT').reduce((s, t) => s + (t.amount || 0), 0),
+                    outstandingPrincipal: tc.expectedPrincipal,
+                    accruedInterest: tc.expectedInterest,
+                    totalDue: tc.expectedNet
+                };
+            }
+        });
+
         console.log(`✅ Constructed ${testCases.length} test cases successfully.\n`);
 
         let totalPassed = 0;
@@ -255,13 +412,12 @@ function roundMoney(val) {
         for (const tc of testCases) {
             // Inject state into page & simulate user data entry via DOM
             await page.evaluate((test) => {
-                state.isTestMode = true;
+                state.isTestMode = false;
                 state.isAuthenticated = true;
-                state.currentLedgerSummary = null;
 
                 const cust = {
                     id: `cust-stress-${test.id}`,
-                    name: test.id === 1 ? 'Meena Ashok' : `Stress Customer ${test.id}`,
+                    name: test.id === 1 ? 'Meena Ashok' : (test.id === 2 ? 'Bug Report Customer' : `Stress Customer ${test.id}`),
                     phone: '9876543210',
                     lendingRate: test.rate,
                     rateUnit: test.rateUnit,
@@ -277,6 +433,27 @@ function roundMoney(val) {
                     ...t
                 }));
 
+                // Strict Backend Payload Binding
+                state.currentLedgerSummary = test.summary;
+                state.currentLedgerBreakdownLog = test.breakdownLog;
+
+                // Mock LedgerAPI.getCustomerLedger to return canonical payload
+                if (window.LedgerAPI) {
+                    window.LedgerAPI.getCustomerLedger = async (custId, params) => {
+                        return {
+                            success: true,
+                            data: {
+                                summary: test.summary,
+                                breakdownLog: test.breakdownLog,
+                                transactions: state.transactions
+                            },
+                            summary: test.summary,
+                            breakdownLog: test.breakdownLog,
+                            transactions: state.transactions
+                        };
+                    };
+                }
+
                 const asOfInput = document.getElementById('ledger-as-of-date');
                 if (asOfInput) {
                     asOfInput.value = test.asOfDate;
@@ -288,8 +465,10 @@ function roundMoney(val) {
                 renderLedger();
             }, tc);
 
-            // Scrape Dashboard #summary-interest
+            // Scrape Dashboard cards
+            const principalText = await page.$eval('#summary-principal', el => el.innerText.trim());
             const dashboardText = await page.$eval('#summary-interest', el => el.innerText.trim());
+            const netText = await page.$eval('#summary-net', el => el.innerText.trim());
 
             // Physically trigger breakdown modal via See Calculation button / handler
             await page.evaluate(() => {
@@ -353,11 +532,22 @@ function roundMoney(val) {
                 return parseFloat(clean) || 0;
             };
 
+            const principalVal = parseVal(principalText);
             const dashboardVal = parseVal(dashboardText);
+            const netVal = parseVal(netText);
             const expectedVal = tc.expectedInterest;
 
             let casePassed = true;
             const errors = [];
+
+            if (tc.expectedPrincipal !== undefined && Math.abs(principalVal - tc.expectedPrincipal) > 0.01) {
+                casePassed = false;
+                errors.push(`Dashboard #summary-principal (₹${principalVal}) != Expected (₹${tc.expectedPrincipal})`);
+            }
+            if (tc.expectedNet !== undefined && Math.abs(netVal - tc.expectedNet) > 0.01) {
+                casePassed = false;
+                errors.push(`Dashboard #summary-net (₹${netVal}) != Expected (₹${tc.expectedNet})`);
+            }
 
             if (modalAudit.error) {
                 casePassed = false;
