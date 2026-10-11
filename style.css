@@ -692,9 +692,25 @@ button {
     margin-bottom: 0.75rem;
     display: flex;
     align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
 }
 .parties-list-header .search-bar {
-    width: 100%;
+    flex: 1;
+    min-width: 13.75rem;
+}
+.total-accounts-badge {
+    background: var(--surface-color);
+    border: 0.0625rem solid var(--border-color);
+    box-shadow: var(--card-shadow);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.5rem 0.875rem;
+    border-radius: 0.75rem;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
 }
 .search-bar { 
     display: flex; 

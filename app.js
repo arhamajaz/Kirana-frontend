@@ -973,6 +973,25 @@ function renderDashboard(searchTerm = '') {
     if (!tbody) return;
     tbody.innerHTML = '';
 
+    // Directive 2: Retrieve total number of customers and display Total Accounts count
+    const totalCount = (state.pagination && typeof state.pagination.total === 'number')
+        ? state.pagination.total
+        : ((state.customers && state.customers.length) || 0);
+
+    let totalBadge = document.getElementById('total-accounts-badge');
+    if (!totalBadge) {
+        const header = document.querySelector('.parties-list-header');
+        if (header) {
+            totalBadge = document.createElement('span');
+            totalBadge.id = 'total-accounts-badge';
+            totalBadge.className = 'total-accounts-badge';
+            header.appendChild(totalBadge);
+        }
+    }
+    if (totalBadge) {
+        totalBadge.textContent = `Total Accounts: ${totalCount}`;
+    }
+
     let globalPrincipal = 0;
     let globalInterest = 0;
     let globalNet = 0;
@@ -2248,7 +2267,8 @@ document.getElementById('btn-whatsapp').onclick = () => {
     }
 
     const formattedNet = formatCurrency(netBalance).replace('₹', '').trim();
-    const msg = `Namaste ${customer.name}, your current pending ledger balance is ₹${formattedNet}. Please settle it at your earliest convenience.`;
+    // Directive 1: Hindi WhatsApp reminder template
+    const msg = `नमस्ते ${customer.name} जी, आपके खाते में वर्तमान बकाया राशि ₹${formattedNet} है। कृपया अपनी सुविधानुसार जल्द से जल्द भुगतान करने का कष्ट करें।`;
 
     const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
     window.open(waUrl, '_blank');
