@@ -1707,7 +1707,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .auth-tabs {
-    display: flex;
+    display: none !important;
     background: var(--bg-color);
     border: 0.0625rem solid var(--border-color);
     border-radius: 0.625rem;
@@ -1741,8 +1741,9 @@ input:focus, select:focus, textarea:focus {
     gap: 1rem;
 }
 
-.auth-form.hidden {
-    display: none;
+.auth-form.hidden,
+#signup-form {
+    display: none !important;
 }
 
 .auth-error-msg {
