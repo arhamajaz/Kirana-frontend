@@ -1134,10 +1134,59 @@ function renderLedger() {
     const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
     const ledger = calculateLedger(state.currentCustomerId, asOfDateStr);
 
-    if (!state.isTestMode && state.currentLedgerSummary && typeof state.currentLedgerSummary.outstandingPrincipal === 'number') {
-        document.getElementById('summary-principal').textContent = formatCurrency(state.currentLedgerSummary.outstandingPrincipal);
-        document.getElementById('summary-interest').textContent = formatCurrency(state.currentLedgerSummary.accruedInterest);
+    // Directive 1: Calculate rawPrincipal as arithmetic sum of Total Debits - Total Credits from transactions array
+    const custTxns = (state.transactions || [])
+        .filter(t => t.customerId === state.currentCustomerId && !t.isVoid && !t.isBadDebt)
+        .filter(t => {
+            if (!asOfDateStr) return true;
+            const tDate = new Date(t.date);
+            const asOf = new Date(asOfDateStr);
+            asOf.setHours(23, 59, 59, 999);
+            return isNaN(tDate.getTime()) || tDate <= asOf;
+        });
 
+    const totalDebits = custTxns
+        .filter(t => (t.type || '').toLowerCase() === 'debit')
+        .reduce((sum, t) => roundMoney(sum + (parseFloat(t.amount) || 0)), 0);
+    const totalCredits = custTxns
+        .filter(t => (t.type || '').toLowerCase() === 'credit')
+        .reduce((sum, t) => roundMoney(sum + (parseFloat(t.amount) || 0)), 0);
+    const rawPrincipal = (typeof ledger?.rawPrincipal === 'number')
+        ? ledger.rawPrincipal
+        : roundMoney(totalDebits - totalCredits);
+
+    // Directive 1: Calculate grossInterest by summing ALL interestGenerated from breakdownLog array
+    const breakdownLog = (typeof state !== 'undefined' && state.currentLedgerBreakdownLog) ||
+        (state.currentLedgerSummary && state.currentLedgerSummary.breakdownLog) ||
+        computeLocalBreakdownLog(state.currentCustomerId, asOfDateStr);
+
+    const grossInterest = Array.isArray(breakdownLog)
+        ? roundMoney(breakdownLog.reduce((sum, phase) => sum + (phase.interestGenerated !== undefined ? phase.interestGenerated : (phase.interestAccrued || 0)), 0))
+        : 0;
+
+    // Directive 1: Conditional Paid/Covered Badge when grossInterest > 0 and accruedInterest <= 0
+    const remainingAccruedInterest = (!state.isTestMode && state.currentLedgerSummary && typeof state.currentLedgerSummary.accruedInterest === 'number')
+        ? state.currentLedgerSummary.accruedInterest
+        : (ledger.totalAccruedInterest !== undefined ? ledger.totalAccruedInterest : (ledger.accruedInterest || 0));
+
+    const isInterestPaid = grossInterest > 0 && remainingAccruedInterest <= 0;
+
+    const principalEl = document.getElementById('summary-principal');
+    if (principalEl) {
+        principalEl.textContent = formatCurrency(rawPrincipal);
+    }
+
+    const interestEl = document.getElementById('summary-interest');
+    if (interestEl) {
+        if (isInterestPaid) {
+            interestEl.innerHTML = `${formatCurrency(grossInterest)} <span class="status-badge status-settled" style="font-size: 0.75rem; vertical-align: middle; margin-left: 6px; padding: 2px 8px; font-weight: 700; border-radius: 4px; text-transform: none;">(Paid)</span>`;
+        } else {
+            interestEl.textContent = formatCurrency(grossInterest);
+        }
+    }
+
+    // Directive 1: Total Net Balance Card (DO NOT TOUCH - Unaltered true mathematical total)
+    if (!state.isTestMode && state.currentLedgerSummary && typeof state.currentLedgerSummary.outstandingPrincipal === 'number') {
         const isCredit = (state.currentLedgerSummary.unallocatedCredit || 0) > 0 || (state.currentLedgerSummary.totalDue || 0) < 0;
         const netAmt = (state.currentLedgerSummary.unallocatedCredit || 0) > 0
             ? state.currentLedgerSummary.unallocatedCredit
@@ -1149,9 +1198,6 @@ function renderLedger() {
             netEl.className = 'amount stat-net-amount';
         }
     } else {
-        document.getElementById('summary-principal').textContent = formatCurrency(ledger.totalPrincipalRemaining);
-        document.getElementById('summary-interest').textContent = formatCurrency(ledger.totalAccruedInterest);
-
         const isCredit = ledger.netOutstanding < 0;
         const netAmt = Math.abs(ledger.netOutstanding);
 
