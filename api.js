@@ -353,7 +353,21 @@ async function getCustomerById(id) {
 }
 
 async function getCustomerLedger(customerId, params) {
-    return request("GET", `/customers/${customerId}/ledger${buildQuery(params)}`, null, true);
+    const res = await request("GET", `/customers/${customerId}/ledger${buildQuery(params)}`, null, true);
+    if (res && typeof res === 'object') {
+        const bLog = Array.isArray(res.breakdownLog)
+            ? res.breakdownLog
+            : (res.data && Array.isArray(res.data.breakdownLog)
+                ? res.data.breakdownLog
+                : (res.summary && Array.isArray(res.summary.breakdownLog) ? res.summary.breakdownLog : null));
+        if (bLog) {
+            res.breakdownLog = bLog;
+            if (res.data && typeof res.data === 'object') {
+                res.data.breakdownLog = bLog;
+            }
+        }
+    }
+    return res;
 }
 
 async function getCustomerTransactions(customerId, params) {

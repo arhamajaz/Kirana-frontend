@@ -1104,8 +1104,13 @@ async function openLedger(customerId) {
         
         if (response) {
             const dataObj = response.data || response;
-            state.currentLedgerSummary = dataObj.summary || null;
-            state.currentLedgerBreakdownLog = Array.isArray(dataObj.breakdownLog) ? dataObj.breakdownLog : null;
+            state.currentLedgerSummary = dataObj.summary || response.summary || null;
+            const incomingBreakdownLog = (Array.isArray(dataObj.breakdownLog) && dataObj.breakdownLog) ||
+                (Array.isArray(response.breakdownLog) && response.breakdownLog) ||
+                (dataObj.summary && Array.isArray(dataObj.summary.breakdownLog) && dataObj.summary.breakdownLog) ||
+                (response.summary && Array.isArray(response.summary.breakdownLog) && response.summary.breakdownLog) ||
+                null;
+            state.currentLedgerBreakdownLog = incomingBreakdownLog;
             if (!state.currentLedgerBreakdownLog) {
                 console.error("Critical: Backend ledger payload is missing 'breakdownLog' array! Customer ID:", customerId, response);
             }
@@ -1183,9 +1188,8 @@ function renderLedger() {
     const totalCredits = custTxns
         .filter(t => (t.type || '').toLowerCase() === 'credit')
         .reduce((sum, t) => roundMoney(sum + (parseFloat(t.amount) || 0)), 0);
-    const rawPrincipal = (typeof ledger?.rawPrincipal === 'number')
-        ? ledger.rawPrincipal
-        : roundMoney(totalDebits - totalCredits);
+    // Directive 2.1: Current Principal: Must display the "Raw Principal" (Total Debits - Total Credits) mapped from the transactions array
+    const rawPrincipal = roundMoney(totalDebits - totalCredits);
 
     // Directive 1: Calculate grossInterest by summing ALL interestGenerated from breakdownLog array
     const breakdownLog = (typeof state !== 'undefined' && state.currentLedgerBreakdownLog) ||
@@ -1201,9 +1205,12 @@ function renderLedger() {
         : 0;
 
     // Directive 1: Conditional Paid/Covered Badge when grossInterest > 0 and accruedInterest <= 0
+    // Directive 2.3: Conditional Paid/Covered Badge when grossInterest > 0 and accruedInterest <= 0
     const remainingAccruedInterest = (state.currentLedgerSummary && typeof state.currentLedgerSummary.accruedInterest === 'number')
         ? state.currentLedgerSummary.accruedInterest
-        : (ledger.totalAccruedInterest !== undefined ? ledger.totalAccruedInterest : (ledger.accruedInterest || 0));
+        : (state.currentLedgerSummary && typeof state.currentLedgerSummary.totalAccruedInterest === 'number')
+            ? state.currentLedgerSummary.totalAccruedInterest
+            : (ledger.totalAccruedInterest !== undefined ? ledger.totalAccruedInterest : (ledger.accruedInterest || 0));
 
     const isInterestPaid = grossInterest > 0 && remainingAccruedInterest <= 0;
 
@@ -4075,21 +4082,32 @@ async function showInterestBreakdown(txnId = null) {
     `;
     toggleModal('interest-breakdown-modal', true);
 
-    let breakdownLog = (state.currentLedgerBreakdownLog && Array.isArray(state.currentLedgerBreakdownLog)) ? state.currentLedgerBreakdownLog : null;
+    let breakdownLog = (state.currentLedgerBreakdownLog && Array.isArray(state.currentLedgerBreakdownLog))
+        ? state.currentLedgerBreakdownLog
+        : ((state.currentLedgerSummary && Array.isArray(state.currentLedgerSummary.breakdownLog))
+            ? state.currentLedgerSummary.breakdownLog
+            : null);
     let totalInterestSum = null;
 
     try {
-        if (!breakdownLog && state.isAuthenticated && LedgerAPI.getToken() && !state.isTestMode) {
+        if (!breakdownLog && typeof LedgerAPI !== 'undefined' && typeof LedgerAPI.getCustomerLedger === 'function') {
             const params = {};
             if (asOfDateStr) {
                 params.calculationDate = asOfDateStr;
             }
             const backendLedger = await LedgerAPI.getCustomerLedger(targetCustId, params);
             if (backendLedger) {
-                const dataObj = backendLedger.data || backendLedger;
-                breakdownLog = Array.isArray(dataObj.breakdownLog) ? dataObj.breakdownLog : (Array.isArray(backendLedger.breakdownLog) ? backendLedger.breakdownLog : null);
+                const dataObj = (backendLedger && backendLedger.data) ? backendLedger.data : backendLedger;
+                breakdownLog = (Array.isArray(dataObj.breakdownLog) && dataObj.breakdownLog) ||
+                               (Array.isArray(backendLedger.breakdownLog) && backendLedger.breakdownLog) ||
+                               (Array.isArray(dataObj.summary?.breakdownLog) && dataObj.summary.breakdownLog) ||
+                               (Array.isArray(backendLedger.summary?.breakdownLog) && backendLedger.summary.breakdownLog) ||
+                               null;
                 if (breakdownLog) {
                     state.currentLedgerBreakdownLog = breakdownLog;
+                }
+                if (dataObj.summary || backendLedger.summary) {
+                    state.currentLedgerSummary = dataObj.summary || backendLedger.summary;
                 }
                 totalInterestSum = dataObj.summary?.accruedInterest ?? dataObj.totalAccruedInterest ?? backendLedger.summary?.accruedInterest ?? backendLedger.totalAccruedInterest ?? null;
             }
@@ -4213,8 +4231,13 @@ async function showInterestBreakdown(txnId = null) {
 }
 
 document.getElementById('ledger-as-of-date')?.addEventListener('change', () => {
-    state.currentLedgerSummary = null;
-    renderLedger();
+    if (state.currentCustomerId) {
+        openLedger(state.currentCustomerId);
+    } else {
+        state.currentLedgerSummary = null;
+        state.currentLedgerBreakdownLog = null;
+        renderLedger();
+    }
 });
 
 // ==========================================
