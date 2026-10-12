@@ -411,7 +411,7 @@ function roundMoney(val) {
 
         for (const tc of testCases) {
             // Inject state into page & simulate user data entry via DOM
-            await page.evaluate((test) => {
+            await page.evaluate(async (test) => {
                 state.isTestMode = false;
                 state.isAuthenticated = true;
 
@@ -433,9 +433,9 @@ function roundMoney(val) {
                     ...t
                 }));
 
-                // Strict Backend Payload Binding
-                state.currentLedgerSummary = test.summary;
-                state.currentLedgerBreakdownLog = test.breakdownLog;
+                // Reset state to ensure openLedger populates it
+                state.currentLedgerSummary = null;
+                state.currentLedgerBreakdownLog = null;
 
                 // Mock LedgerAPI.getCustomerLedger to return canonical payload
                 if (window.LedgerAPI) {
@@ -456,13 +456,11 @@ function roundMoney(val) {
 
                 const asOfInput = document.getElementById('ledger-as-of-date');
                 if (asOfInput) {
-                    asOfInput.value = test.asOfDate;
+                    asOfInput.value = test.asOfDate || '';
                 }
 
-                if (typeof switchView === 'function') {
-                    switchView('ledger-view');
-                }
-                renderLedger();
+                // Explicitly exercise full openLedger pipeline
+                await openLedger(cust.id);
             }, tc);
 
             // Scrape Dashboard cards
@@ -516,6 +514,8 @@ function roundMoney(val) {
                     footerTotal = parseFloat(totalMatch[1].replace(/,/g, '')) || 0;
                 }
 
+                const hasMissingDataError = innerText.includes('Backend breakdown data is missing or unavailable');
+
                 return {
                     cardCount: cards.length,
                     phaseInterests,
@@ -523,6 +523,16 @@ function roundMoney(val) {
                     footerTotal,
                     hasNaN,
                     hasUndefined,
+                    hasMissingDataError,
+                };
+            });
+
+            // Directive 3: Explicitly test for presence of breakdownLog in frontend state
+            const stateAudit = await page.evaluate(() => {
+                return {
+                    hasBreakdownLog: Array.isArray(window.state?.currentLedgerBreakdownLog),
+                    breakdownLength: window.state?.currentLedgerBreakdownLog ? window.state.currentLedgerBreakdownLog.length : 0,
+                    hasSummary: !!window.state?.currentLedgerSummary
                 };
             });
 
@@ -540,6 +550,11 @@ function roundMoney(val) {
             let casePassed = true;
             const errors = [];
 
+            if (!stateAudit.hasBreakdownLog) {
+                casePassed = false;
+                errors.push('Pipeline State Gap: window.state.currentLedgerBreakdownLog is missing or not an array!');
+            }
+
             if (tc.expectedPrincipal !== undefined && Math.abs(principalVal - tc.expectedPrincipal) > 0.01) {
                 casePassed = false;
                 errors.push(`Dashboard #summary-principal (₹${principalVal}) != Expected (₹${tc.expectedPrincipal})`);
@@ -553,6 +568,10 @@ function roundMoney(val) {
                 casePassed = false;
                 errors.push(modalAudit.error);
             } else {
+                if (modalAudit.hasMissingDataError) {
+                    casePassed = false;
+                    errors.push('Modal Error: "Backend breakdown data is missing or unavailable" detected in DOM!');
+                }
                 if (modalAudit.hasNaN) {
                     casePassed = false;
                     errors.push('DOM contains "NaN"');

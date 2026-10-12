@@ -16,7 +16,7 @@ if (typeof window !== 'undefined' && !window.LedgerAPI) {
         createTransaction: async (d) => d,
         updateTransaction: async (id, d) => d,
         voidTransaction: async () => {},
-        getCustomerLedger: async () => ({}),
+        getCustomerLedger: async () => ({ status: 'success', data: { breakdownLog: [], summary: {} }, breakdownLog: [], summary: {} }),
         getCustomerTransactions: async () => [],
         getItems: async () => [],
         createItem: async (d) => d,
@@ -184,6 +184,9 @@ let state = {
     currentLedgerSummary: null,
     currentLedgerBreakdownLog: null
 };
+
+// Expose state globally for browser testing, debugging, and external consumers
+window.state = state;
 
 function saveData() {
     try {
@@ -1111,6 +1114,9 @@ async function openLedger(customerId) {
                 (response.summary && Array.isArray(response.summary.breakdownLog) && response.summary.breakdownLog) ||
                 null;
             state.currentLedgerBreakdownLog = incomingBreakdownLog;
+            if (state.currentLedgerSummary && incomingBreakdownLog && !state.currentLedgerSummary.breakdownLog) {
+                state.currentLedgerSummary.breakdownLog = incomingBreakdownLog;
+            }
             if (!state.currentLedgerBreakdownLog) {
                 console.error("Critical: Backend ledger payload is missing 'breakdownLog' array! Customer ID:", customerId, response);
             }
@@ -1119,13 +1125,10 @@ async function openLedger(customerId) {
                 state.transactions = state.transactions.filter(t => t.customerId !== customerId);
                 
                 const fetched = dataObj.transactions.map(tx => ({
-                    id: tx.id,
-                    customerId: tx.customerId,
-                    date: tx.date,
+                    ...tx,
+                    type: (tx.type || '').toLowerCase(),
                     interestStartDate: tx.interestStartDate || tx.date,
-                    type: tx.type.toLowerCase(),
                     category: tx.category || 'Cash',
-                    amount: tx.amount,
                     remarks: tx.remarks || '',
                     interestPhases: tx.interestPhases || []
                 }));
@@ -4134,11 +4137,9 @@ async function showInterestBreakdown(txnId = null) {
     }
 
     // Directive 2: phase.interestGenerated is the ONLY variable rendered and summed
-    if (totalInterestSum === null || totalInterestSum === undefined) {
-        totalInterestSum = roundMoney(
-            breakdownLog.reduce((sum, phase) => sum + (Number(phase.interestGenerated) || 0), 0)
-        );
-    }
+    totalInterestSum = roundMoney(
+        breakdownLog.reduce((sum, phase) => sum + (Number(phase.interestGenerated) || 0), 0)
+    );
 
     if (breakdownLog.length === 0) {
         container.innerHTML = `

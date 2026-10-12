@@ -359,12 +359,20 @@ async function getCustomerLedger(customerId, params) {
             ? res.breakdownLog
             : (res.data && Array.isArray(res.data.breakdownLog)
                 ? res.data.breakdownLog
-                : (res.summary && Array.isArray(res.summary.breakdownLog) ? res.summary.breakdownLog : null));
-        if (bLog) {
-            res.breakdownLog = bLog;
-            if (res.data && typeof res.data === 'object') {
-                res.data.breakdownLog = bLog;
+                : (res.summary && Array.isArray(res.summary.breakdownLog)
+                    ? res.summary.breakdownLog
+                    : (res.data && res.data.summary && Array.isArray(res.data.summary.breakdownLog)
+                        ? res.data.summary.breakdownLog
+                        : [])));
+        res.breakdownLog = bLog;
+        if (res.data && typeof res.data === 'object') {
+            res.data.breakdownLog = bLog;
+            if (res.data.summary && typeof res.data.summary === 'object') {
+                res.data.summary.breakdownLog = bLog;
             }
+        }
+        if (res.summary && typeof res.summary === 'object') {
+            res.summary.breakdownLog = bLog;
         }
     }
     return res;
@@ -553,8 +561,8 @@ async function getReportSummary(type = "all") {
     }
 }
 
-// 9. Expose public API globally under a frozen object
-window.LedgerAPI = Object.freeze({
+// 9. Expose public API globally
+window.LedgerAPI = {
     setUnauthorizedHandler,
     login,
     loginUser,
@@ -595,4 +603,4 @@ window.LedgerAPI = Object.freeze({
     sanitizePhoneNumber,
     sanitizeRate,
     sanitizeAmount
-});
+};
