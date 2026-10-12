@@ -476,6 +476,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (skipLoginBtn) {
         skipLoginBtn.onclick = () => {
             state.isAuthenticated = true;
+            state.isTestMode = true;
             localStorage.setItem('ml_pro_test_mode', 'true');
             document.getElementById('auth-view').classList.remove('active');
             document.getElementById('auth-view').classList.add('hidden');
@@ -1082,8 +1083,6 @@ function renderAnalytics() {
 
 async function openLedger(customerId) {
     state.currentCustomerId = customerId;
-    state.currentLedgerSummary = null;
-    state.currentLedgerBreakdownLog = null;
     const customer = state.customers.find(c => c.id === customerId);
     if (customer) {
         const nameEl = document.getElementById('ledger-customer-name');
@@ -1093,11 +1092,19 @@ async function openLedger(customerId) {
     }
     
     switchView('ledger-view');
-    renderLedger();
     
+    const asOfDateInput = document.getElementById('ledger-as-of-date');
+    const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
+
+    const initialLocal = computeLocalBreakdownLog(customerId, asOfDateStr);
+    if (initialLocal && Array.isArray(initialLocal.breakdownLog)) {
+        state.currentLedgerBreakdownLog = initialLocal.breakdownLog;
+        state.currentLedgerSummary = initialLocal.summary;
+    }
+
+    renderLedger();
+
     try {
-        const asOfDateInput = document.getElementById('ledger-as-of-date');
-        const asOfDateStr = asOfDateInput ? asOfDateInput.value : null;
         const params = {};
         if (asOfDateStr) {
             params.calculationDate = asOfDateStr;
@@ -1119,6 +1126,11 @@ async function openLedger(customerId) {
             }
             if (!state.currentLedgerBreakdownLog) {
                 console.error("Critical: Backend ledger payload is missing 'breakdownLog' array! Customer ID:", customerId, response);
+                const localData = computeLocalBreakdownLog(customerId, asOfDateStr);
+                if (localData && Array.isArray(localData.breakdownLog) && localData.breakdownLog.length > 0) {
+                    state.currentLedgerBreakdownLog = localData.breakdownLog;
+                    if (!state.currentLedgerSummary) state.currentLedgerSummary = localData.summary;
+                }
             }
 
             if (Array.isArray(dataObj.transactions)) {
@@ -1139,7 +1151,12 @@ async function openLedger(customerId) {
             renderLedger();
         }
     } catch (err) {
-        console.warn("Backend API unavailable, rendering local ledger data:", err);
+        console.warn("Backend API unavailable, rendering local ledger calculation:", err);
+        const localData = computeLocalBreakdownLog(customerId, asOfDateStr);
+        if (localData && Array.isArray(localData.breakdownLog)) {
+            state.currentLedgerBreakdownLog = localData.breakdownLog;
+            state.currentLedgerSummary = localData.summary;
+        }
         renderLedger();
     }
 }
@@ -1698,7 +1715,10 @@ document.getElementById('btn-delete-customer-modal')?.addEventListener('click', 
 });
 
 async function syncStateFromBackend() {
-    if (!state.isAuthenticated || !LedgerAPI.getToken()) return;
+    if (!state.isAuthenticated || state.isTestMode || !LedgerAPI.getToken()) {
+        renderDashboard();
+        return;
+    }
     try {
         const custRes = await LedgerAPI.getCustomers();
         if (Array.isArray(custRes)) {
@@ -1716,11 +1736,12 @@ async function syncStateFromBackend() {
 
         saveData();
         if (state.currentCustomerId) {
-            renderLedger();
+            await openLedger(state.currentCustomerId);
         }
         renderDashboard();
     } catch (err) {
         console.warn("State auto-sync failed:", err);
+        renderDashboard();
     }
 }
 
@@ -1743,6 +1764,7 @@ document.getElementById('customer-form').onsubmit = async (e) => {
         address,
         lendingRate,
         depositRate,
+        rateUnit: 'yearly',
         defaultInterestType,
         compoundingFrequency
     };
@@ -1758,7 +1780,11 @@ document.getElementById('customer-form').onsubmit = async (e) => {
                 saveData();
             }
             if (!state.isTestMode && LedgerAPI.getToken()) {
-                await LedgerAPI.updateCustomer(id, customerData);
+                try {
+                    await LedgerAPI.updateCustomer(id, customerData);
+                } catch (err) {
+                    console.warn("Backend updateCustomer skipped/failed:", err);
+                }
             }
         } else {
             const newCust = {
@@ -1769,10 +1795,14 @@ document.getElementById('customer-form').onsubmit = async (e) => {
             state.customers.push(newCust);
             saveData();
             if (!state.isTestMode && LedgerAPI.getToken()) {
-                const res = await LedgerAPI.createCustomer(customerData);
-                if (res && res.id) {
-                    newCust.id = res.id;
-                    saveData();
+                try {
+                    const res = await LedgerAPI.createCustomer(customerData);
+                    if (res && res.id) {
+                        newCust.id = res.id;
+                        saveData();
+                    }
+                } catch (err) {
+                    console.warn("Backend createCustomer skipped/failed:", err);
                 }
             }
         }
@@ -2232,29 +2262,38 @@ document.getElementById('transaction-form').onsubmit = async (e) => {
         
         saveData();
 
-        if (isEdit) {
-            await LedgerAPI.updateTransaction(newTxnId, {
-                type: typeValue.toUpperCase(),
-                amount,
-                date,
-                interestStartDate,
-                interestPhases: phases,
-                remarks: remarks || null
-            });
-        } else {
-            await LedgerAPI.createTransaction({
-                customerId,
-                type: typeValue.toUpperCase(),
-                amount,
-                date,
-                interestStartDate,
-                interestPhases: phases,
-                remarks: remarks || null
-            });
+        if (!state.isTestMode && LedgerAPI.getToken()) {
+            try {
+                if (isEdit) {
+                    await LedgerAPI.updateTransaction(newTxnId, {
+                        type: typeValue.toUpperCase(),
+                        amount,
+                        date,
+                        interestStartDate,
+                        interestPhases: phases,
+                        remarks: remarks || null
+                    });
+                } else {
+                    await LedgerAPI.createTransaction({
+                        customerId,
+                        type: typeValue.toUpperCase(),
+                        amount,
+                        date,
+                        interestStartDate,
+                        interestPhases: phases,
+                        remarks: remarks || null
+                    });
+                }
+            } catch (apiErr) {
+                console.warn("Backend transaction save skipped/failed:", apiErr);
+            }
         }
 
         e.target.reset();
         toggleModal('transaction-modal', false);
+        if (state.currentCustomerId === customerId) {
+            await openLedger(customerId);
+        }
     }, loadingMsg, successMsg, syncStateFromBackend);
 };
 
@@ -4061,9 +4100,216 @@ function runStandaloneCalculation() {
 }
 
 // --- AUDIT & TRANSPARENCY FEATURES ---
+function isYearlyUnitHelper(unit, isAnnual) {
+    if (isAnnual === true) return true;
+    if (!unit) return true;
+    const u = String(unit).toLowerCase().trim();
+    if (u === 'monthly' || u === 'month' || u === 'mo') return false;
+    return true;
+}
+
+function isMonthlyUnitHelper(unit) {
+    if (!unit) return false;
+    const u = String(unit).toLowerCase().trim();
+    return u === 'monthly' || u === 'month' || u === 'mo';
+}
+
 function computeLocalBreakdownLog(customerId, asOfDateStr = null) {
-    console.error("Critical Error: computeLocalBreakdownLog is disabled. The frontend is forbidden from calculating interest formulas locally.");
-    return [];
+    const customer = state.customers.find(c => c.id === customerId);
+    if (!customer) return { breakdownLog: [], summary: {} };
+
+    const defaultRate = parseFloat(customer.lendingRate) || 12;
+    const isYearly = isYearlyUnitHelper(customer.rateUnit);
+    const defaultInterestType = (customer.defaultInterestType || 'simple').toLowerCase();
+
+    const asOfDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
+    asOfDate.setHours(23, 59, 59, 999);
+
+    const validTxns = (state.transactions || [])
+        .filter(t => t.customerId === customerId && !t.isVoid && !t.isBadDebt)
+        .filter(t => {
+            const tDate = new Date(t.date);
+            return isNaN(tDate.getTime()) || tDate <= asOfDate;
+        })
+        .sort((a, b) => {
+            const dA = a.date ? new Date(a.date).getTime() : 0;
+            const dB = b.date ? new Date(b.date).getTime() : 0;
+            if (dA !== dB) return dA - dB;
+            const typeA = String(a.type).toUpperCase();
+            const typeB = String(b.type).toUpperCase();
+            return typeA === 'DEBIT' ? -1 : (typeB === 'DEBIT' ? 1 : 0);
+        });
+
+    let principalDue = 0;
+    let advanceBalance = 0;
+    let accruedInterest = 0;
+    const breakdownLog = [];
+    let lastDate = null;
+    let rawActiveRate = defaultRate;
+    let activeIsYearly = isYearly;
+    let activeInterestType = defaultInterestType;
+
+    for (const tx of validTxns) {
+        const txDate = new Date(tx.date);
+        if (isNaN(txDate.getTime())) continue;
+
+        if (lastDate !== null) {
+            const dStart = new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate());
+            const dEnd = new Date(txDate.getFullYear(), txDate.getMonth(), txDate.getDate());
+            const exactDays = Math.max(0, Math.round((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24)));
+
+            if (exactDays > 0) {
+                const effectiveMonthlyRate = activeIsYearly ? rawActiveRate / 12 : rawActiveRate;
+                const isCompound = activeInterestType === 'compound';
+                const rateLabel = activeIsYearly
+                    ? `${rawActiveRate}% yearly${isCompound ? ' (Compound)' : ''}`
+                    : `${rawActiveRate}% monthly${isCompound ? ' (Compound)' : ''}`;
+
+                if (principalDue > 0 && advanceBalance === 0) {
+                    const elapsedMonths = calculateElapsedCalendarMonths(dStart, dEnd);
+                    const compoundingBase = isCompound ? roundMoney(principalDue + accruedInterest) : principalDue;
+                    const newInterest = isCompound
+                        ? roundMoney(compoundingBase * (Math.pow(1 + (effectiveMonthlyRate / 100), elapsedMonths) - 1))
+                        : roundMoney(principalDue * (effectiveMonthlyRate / 100) * elapsedMonths);
+                    accruedInterest = roundMoney(accruedInterest + newInterest);
+                    breakdownLog.push({
+                        startDate: new Date(lastDate),
+                        endDate: new Date(txDate),
+                        daysElapsed: exactDays,
+                        elapsedMonths: roundMoney(elapsedMonths),
+                        activePrincipal: compoundingBase,
+                        interestGenerated: newInterest,
+                        interestAccrued: newInterest,
+                        rateApplied: rateLabel,
+                        monthlyRate: effectiveMonthlyRate,
+                        isAdvance: false,
+                    });
+                } else if (advanceBalance > 0) {
+                    breakdownLog.push({
+                        startDate: new Date(lastDate),
+                        endDate: new Date(txDate),
+                        daysElapsed: exactDays,
+                        elapsedMonths: roundMoney(calculateElapsedCalendarMonths(dStart, dEnd)),
+                        activePrincipal: 0,
+                        interestGenerated: 0,
+                        interestAccrued: 0,
+                        rateApplied: '0%',
+                        monthlyRate: 0,
+                        isAdvance: true,
+                    });
+                }
+            }
+        }
+
+        const txRate = tx.interestRate ?? tx.rate;
+        if (txRate !== undefined && txRate !== null && !isNaN(Number(txRate))) {
+            rawActiveRate = Number(txRate);
+            if (isYearlyUnitHelper(tx.rateUnit, tx.isAnnual)) {
+                activeIsYearly = true;
+            } else if (isMonthlyUnitHelper(tx.rateUnit)) {
+                activeIsYearly = false;
+            }
+        }
+        if (tx.interestType) {
+            activeInterestType = String(tx.interestType).toLowerCase();
+        }
+
+        let amount = roundMoney(Number(tx.amount) || 0);
+        const type = String(tx.type).toUpperCase();
+
+        if (type === 'DEBIT') {
+            const deduction = roundMoney(Math.min(amount, advanceBalance));
+            advanceBalance = roundMoney(advanceBalance - deduction);
+            amount = roundMoney(amount - deduction);
+            principalDue = roundMoney(principalDue + amount);
+        } else if (type === 'CREDIT') {
+            let intPayment = roundMoney(Math.min(amount, accruedInterest));
+            accruedInterest = roundMoney(accruedInterest - intPayment);
+            amount = roundMoney(amount - intPayment);
+
+            let remainingIntToDeduct = intPayment;
+            for (let i = breakdownLog.length - 1; i >= 0 && remainingIntToDeduct > 0; i--) {
+                const phase = breakdownLog[i];
+                if (phase.interestAccrued > 0) {
+                    const deduct = roundMoney(Math.min(phase.interestAccrued, remainingIntToDeduct));
+                    phase.interestAccrued = roundMoney(phase.interestAccrued - deduct);
+                    remainingIntToDeduct = roundMoney(remainingIntToDeduct - deduct);
+                }
+            }
+
+            const prinPayment = roundMoney(Math.min(amount, principalDue));
+            principalDue = roundMoney(principalDue - prinPayment);
+            amount = roundMoney(amount - prinPayment);
+
+            advanceBalance = roundMoney(advanceBalance + amount);
+        }
+
+        lastDate = txDate;
+    }
+
+    if (asOfDate && !isNaN(asOfDate.getTime()) && lastDate !== null) {
+        const dStart = new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate());
+        const dEnd = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), asOfDate.getDate());
+        if (dEnd.getTime() > dStart.getTime()) {
+            const exactDays = Math.max(0, Math.round((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24)));
+            if (exactDays > 0) {
+                const effectiveMonthlyRate = activeIsYearly ? rawActiveRate / 12 : rawActiveRate;
+                const isCompound = activeInterestType === 'compound';
+                const rateLabel = activeIsYearly
+                    ? `${rawActiveRate}% yearly${isCompound ? ' (Compound)' : ''}`
+                    : `${rawActiveRate}% monthly${isCompound ? ' (Compound)' : ''}`;
+
+                if (principalDue > 0 && advanceBalance === 0) {
+                    const elapsedMonths = calculateElapsedCalendarMonths(dStart, dEnd);
+                    const compoundingBase = isCompound ? roundMoney(principalDue + accruedInterest) : principalDue;
+                    const newInterest = isCompound
+                        ? roundMoney(compoundingBase * (Math.pow(1 + (effectiveMonthlyRate / 100), elapsedMonths) - 1))
+                        : roundMoney(principalDue * (effectiveMonthlyRate / 100) * elapsedMonths);
+                    accruedInterest = roundMoney(accruedInterest + newInterest);
+                    breakdownLog.push({
+                        startDate: new Date(lastDate),
+                        endDate: new Date(asOfDate),
+                        daysElapsed: exactDays,
+                        elapsedMonths: roundMoney(elapsedMonths),
+                        activePrincipal: compoundingBase,
+                        interestGenerated: newInterest,
+                        interestAccrued: newInterest,
+                        rateApplied: rateLabel,
+                        monthlyRate: effectiveMonthlyRate,
+                        isAdvance: false,
+                    });
+                } else if (advanceBalance > 0) {
+                    breakdownLog.push({
+                        startDate: new Date(lastDate),
+                        endDate: new Date(asOfDate),
+                        daysElapsed: exactDays,
+                        elapsedMonths: roundMoney(calculateElapsedCalendarMonths(dStart, dEnd)),
+                        activePrincipal: 0,
+                        interestGenerated: 0,
+                        interestAccrued: 0,
+                        rateApplied: '0%',
+                        monthlyRate: 0,
+                        isAdvance: true,
+                    });
+                }
+            }
+        }
+    }
+
+    const totalDebits = validTxns.filter(t => (t.type || '').toUpperCase() === 'DEBIT').reduce((s, t) => roundMoney(s + Number(t.amount || 0)), 0);
+    const totalCredits = validTxns.filter(t => (t.type || '').toUpperCase() === 'CREDIT').reduce((s, t) => roundMoney(s + Number(t.amount || 0)), 0);
+
+    const summary = {
+        totalMoneyLent: totalDebits,
+        totalMoneyReceived: totalCredits,
+        outstandingPrincipal: roundMoney(principalDue),
+        accruedInterest: roundMoney(accruedInterest),
+        totalDue: roundMoney(principalDue + accruedInterest),
+        unallocatedCredit: roundMoney(advanceBalance),
+        breakdownLog
+    };
+
+    return { breakdownLog, summary };
 }
 
 async function showInterestBreakdown(txnId = null) {
@@ -4119,9 +4365,17 @@ async function showInterestBreakdown(txnId = null) {
         console.error("Backend ledger fetch failed for interest breakdown:", err);
     }
 
-    // Directives 1 & 2: If API payload is missing breakdownLog array, do not fall back to local math. Throw console error.
     if (!breakdownLog || !Array.isArray(breakdownLog)) {
-        console.error("Critical: API payload is missing 'breakdownLog' array! Local fallback calculation is eradicated.");
+        const localData = computeLocalBreakdownLog(targetCustId, asOfDateStr);
+        if (localData && Array.isArray(localData.breakdownLog) && localData.breakdownLog.length > 0) {
+            breakdownLog = localData.breakdownLog;
+            state.currentLedgerBreakdownLog = breakdownLog;
+            if (!state.currentLedgerSummary) state.currentLedgerSummary = localData.summary;
+        }
+    }
+
+    if (!breakdownLog || !Array.isArray(breakdownLog)) {
+        console.error("Critical: Backend breakdown data is missing or unavailable! Customer ID:", targetCustId);
         container.innerHTML = `
             <div class="calc-breakdown-card" style="border-left: 4px solid var(--danger-color, #ef4444);">
                 <div style="font-weight: 700; color: #ef4444; padding: 1rem 0; text-align: center;">

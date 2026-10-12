@@ -1,4 +1,10 @@
-const { calculateLedger, calculateElapsedCalendarMonths, roundMoney } = require('../backend/src/utils/ledgerEngine');
+const { calculateLedger, calculateElapsedCalendarMonths, roundMoney } = (() => {
+    try {
+        return require('../backend/dist/utils/ledgerEngine');
+    } catch {
+        return require('../backend/src/utils/ledgerEngine');
+    }
+})();
 
 // Omega Scenario Setup
 const lendingRate = 12.5; // 12.5% yearly default
