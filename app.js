@@ -6,8 +6,8 @@ if (typeof window !== 'undefined' && !window.LedgerAPI) {
         removeToken: () => { localStorage.removeItem("ml_pro_auth_token"); localStorage.removeItem("ml_pro_jwt_token"); },
         healthCheck: async () => ({ status: "offline" }),
         setUnauthorizedHandler: () => {},
-        loginUser: async () => ({ token: "mock_token_" + Date.now() }),
-        registerUser: async () => ({ token: "mock_token_" + Date.now() }),
+        loginUser: async () => { throw new Error("API module not loaded"); },
+        registerUser: async () => { throw new Error("API module not loaded"); },
         getCustomers: async () => [],
         searchCustomers: async () => [],
         createCustomer: async (d) => d,
@@ -162,12 +162,21 @@ window.UIManager = (() => {
 })();
 
 // --- STATE MANAGEMENT ---
+function getInitialCustomers() {
+    const isTestMode = localStorage.getItem('ml_pro_test_mode') === 'true';
+    if (isTestMode) {
+        return JSON.parse(localStorage.getItem('ml_pro_customers')) || [
+            { id: 'cust-1', name: 'Ramesh Kumar', phoneNumber: '9876543210', lendingRate: 12, depositRate: 6 },
+            { id: 'cust-2', name: 'Suresh Patel', phoneNumber: '9812345678', lendingRate: 12, depositRate: 6 }
+        ];
+    }
+    const stored = localStorage.getItem('ml_pro_customers');
+    return stored ? JSON.parse(stored) : [];
+}
+
 let state = {
     isAuthenticated: false,
-    customers: JSON.parse(localStorage.getItem('ml_pro_customers')) || [
-        { id: 'cust-1', name: 'Ramesh Kumar', phoneNumber: '9876543210', lendingRate: 12, depositRate: 6 },
-        { id: 'cust-2', name: 'Suresh Patel', phoneNumber: '9812345678', lendingRate: 12, depositRate: 6 }
-    ],
+    customers: getInitialCustomers(),
     badDebts: JSON.parse(localStorage.getItem('ml_pro_bad_debts')) || [],
     pagination: null,
     transactions: JSON.parse(localStorage.getItem('ml_pro_transactions')) || [],
@@ -301,7 +310,31 @@ if (window.LedgerAPI && typeof window.LedgerAPI.setUnauthorizedHandler === 'func
 function handleLogout(message = "") {
     LedgerAPI.removeToken();
     localStorage.removeItem('ml_pro_test_mode');
+    
+    // Clear user-specific in-memory state
     state.isAuthenticated = false;
+    state.currentUser = null;
+    state.currentCustomerId = null;
+    state.currentLedgerSummary = null;
+    state.currentLedgerBreakdownLog = null;
+    state.customers = [];
+    state.transactions = [];
+    state.badDebts = [];
+    state.pagination = null;
+    state.cashbook = [];
+    state.items = [];
+    state.bills = [];
+
+    // Clear user-specific localStorage caches
+    localStorage.removeItem('ml_pro_customers');
+    localStorage.removeItem('ml_pro_transactions');
+    localStorage.removeItem('ml_pro_bad_debts');
+    localStorage.removeItem('ml_pro_cashbook');
+    localStorage.removeItem('ml_pro_items');
+    localStorage.removeItem('ml_pro_bills');
+    localStorage.removeItem('ml_pro_insurance');
+    localStorage.removeItem('ml_pro_synced_v1');
+
     document.getElementById('app-wrapper').classList.add('hidden');
     document.getElementById('auth-view').classList.remove('hidden');
     document.getElementById('auth-view').classList.add('active');
@@ -386,11 +419,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (user) {
                         state.currentUser = user;
                     }
+                    // Reset user-specific data before fetching fresh account data
+                    state.customers = [];
+                    state.transactions = [];
+                    state.currentCustomerId = null;
+                    state.currentLedgerSummary = null;
+                    state.currentLedgerBreakdownLog = null;
                     document.getElementById('auth-view').classList.remove('active');
                     document.getElementById('auth-view').classList.add('hidden');
                     document.getElementById('app-wrapper').classList.remove('hidden');
                     switchView('dashboard-view');
-                    showDashboard();
+                    await showDashboard();
                 } else {
                     throw new Error('Authentication failed: Invalid credentials.');
                 }
@@ -443,12 +482,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
             try {
                 const signupRes = await LedgerAPI.registerUser(email, password, name, shop);
-                if (signupRes && (signupRes.token || LedgerAPI.getToken())) {
+                const token = signupRes?.data?.token || signupRes?.token || LedgerAPI.getToken();
+                const user = signupRes?.data?.user || signupRes?.user;
+                if (token) {
                     state.isAuthenticated = true;
+                    if (user) {
+                        state.currentUser = user;
+                    }
+                    // Reset user-specific data before fetching fresh account data
+                    state.customers = [];
+                    state.transactions = [];
+                    state.currentCustomerId = null;
+                    state.currentLedgerSummary = null;
+                    state.currentLedgerBreakdownLog = null;
                     document.getElementById('auth-view').classList.remove('active');
                     document.getElementById('auth-view').classList.add('hidden');
                     document.getElementById('app-wrapper').classList.remove('hidden');
                     switchView('dashboard-view');
+                    await showDashboard();
                 } else {
                     throw new Error('Registration failed.');
                 }
@@ -1002,15 +1053,36 @@ function renderDashboard(searchTerm = '') {
 
     let globalPrincipal = 0;
     let globalNet = 0;
+    let globalInterest = 0;
+    let hasAuthoritativeSummaries = false;
 
     (state.customers || []).forEach(c => {
-        const ledger = calculateLedger(c.id);
-        globalPrincipal = roundMoney(globalPrincipal + ledger.rawPrincipal);
-        globalNet = roundMoney(globalNet + ledger.netOutstanding);
+        if (c.ledgerSummary) {
+            hasAuthoritativeSummaries = true;
+            const sum = c.ledgerSummary;
+            const dispAmt = typeof sum.displayAmount === 'number' ? sum.displayAmount : 0;
+            const princ = typeof sum.totalPrincipal === 'number' ? sum.totalPrincipal : 0;
+            const accrued = typeof sum.accruedInterest === 'number' ? sum.accruedInterest : 0;
+
+            const status = sum.status || sum.balanceStatus;
+            if (status === 'Due') {
+                globalNet = roundMoney(globalNet + dispAmt);
+                globalPrincipal = roundMoney(globalPrincipal + princ);
+                globalInterest = roundMoney(globalInterest + accrued);
+            } else if (status === 'Advance') {
+                globalNet = roundMoney(globalNet - dispAmt);
+            }
+        } else if (!c.ledgerSummaryError) {
+            const ledger = calculateLedger(c.id);
+            globalPrincipal = roundMoney(globalPrincipal + ledger.rawPrincipal);
+            globalNet = roundMoney(globalNet + ledger.netOutstanding);
+            globalInterest = roundMoney(globalNet - globalPrincipal);
+        }
     });
 
-    // Directive 2: Hardcode algebraic bridge: Total Net Balance minus Total Principal Outstanding
-    const globalInterest = roundMoney(globalNet - globalPrincipal);
+    if (!hasAuthoritativeSummaries) {
+        globalInterest = roundMoney(globalNet - globalPrincipal);
+    }
 
     const dashNetEl = document.getElementById('dash-stat-net');
     if (document.getElementById('dash-stat-principal')) {
@@ -1035,9 +1107,34 @@ function renderDashboard(searchTerm = '') {
     const sortedCustomers = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
     
     sortedCustomers.forEach(customer => {
-        const ledger = calculateLedger(customer.id);
-        const isCredit = ledger.totalNet < 0;
-        const netClass = isCredit ? 'text-success' : (ledger.totalNet > 0 ? 'text-danger' : '');
+        const ledger = (!customer.ledgerSummary || customer.ledgerSummaryError) ? calculateLedger(customer.id) : null;
+        const custStatus = customer.ledgerSummary ? (customer.ledgerSummary.status || customer.ledgerSummary.balanceStatus) : null;
+        const isNetDue = custStatus ? (custStatus === 'Due') : (ledger && ledger.totalNet > 0);
+        let balanceDisplay = '';
+        let netClass = '';
+
+        if (customer.ledgerSummary) {
+            const sum = customer.ledgerSummary;
+            const dispAmt = typeof sum.displayAmount === 'number' ? sum.displayAmount : 0;
+            const status = sum.status || sum.balanceStatus;
+            if (status === 'Due') {
+                balanceDisplay = `<strong>${formatCurrency(dispAmt)}</strong> (Dr)`;
+                netClass = 'text-danger';
+            } else if (status === 'Advance') {
+                balanceDisplay = `<strong>${formatCurrency(dispAmt)}</strong> (Cr)`;
+                netClass = 'text-success';
+            } else {
+                balanceDisplay = `<strong>${formatCurrency(0)}</strong>`;
+                netClass = '';
+            }
+        } else if (customer.ledgerSummaryError) {
+            balanceDisplay = `<span class="text-secondary" title="Failed to load summary">—</span>`;
+            netClass = '';
+        } else {
+            const isCredit = ledger && ledger.totalNet < 0;
+            netClass = isCredit ? 'text-success' : (ledger && ledger.totalNet > 0 ? 'text-danger' : '');
+            balanceDisplay = `<strong>${formatCurrency(Math.abs(ledger ? ledger.totalNet : 0))}</strong> ${ledger && ledger.totalNet < 0 ? '(Cr)' : (ledger && ledger.totalNet > 0 ? '(Dr)' : '')}`;
+        }
 
         const tr = document.createElement('tr');
         tr.onclick = () => openLedger(customer.id);
@@ -1048,12 +1145,12 @@ function renderDashboard(searchTerm = '') {
                     <span class="customer-cell-phone">${customer.phoneNumber ? '📱 ' + customer.phoneNumber : ''}</span>
                 </div>
             </td>
-            <td class="text-right ${netClass}"><strong>${formatCurrency(Math.abs(ledger.totalNet))}</strong> ${ledger.totalNet < 0 ? '(Cr)' : (ledger.totalNet > 0 ? '(Dr)' : '')}</td>
+            <td class="text-right ${netClass}">${balanceDisplay}</td>
             <td class="text-right">
                 <button class="btn-icon" onclick="event.stopPropagation(); editCustomer('${customer.id}')" title="Edit Customer">
                     <i class="ph ph-pencil-simple"></i>
                 </button>
-                ${!customer.isSettled && ledger.totalNet > 0 ? `
+                ${!customer.isSettled && isNetDue ? `
                     <button class="btn-icon text-danger" onclick="event.stopPropagation(); openMarkBadDebtModal('${customer.id}')" title="Mark as Bad Debt (डूबत)">
                         <i class="ph ph-warning"></i>
                     </button>
@@ -1139,6 +1236,8 @@ async function openLedger(customerId) {
                 
                 const fetched = dataObj.transactions.map(tx => ({
                     ...tx,
+                    isVoid: Boolean(tx.isVoided ?? tx.isVoid),
+                    amount: parseFloat(tx.amount) || 0,
                     type: (tx.type || '').toLowerCase(),
                     interestStartDate: tx.interestStartDate || tx.date,
                     category: tx.category || 'Cash',
@@ -1722,23 +1821,36 @@ async function syncStateFromBackend() {
     }
     try {
         const custRes = await LedgerAPI.getCustomers();
-        if (Array.isArray(custRes)) {
-            state.customers = custRes;
-        } else if (custRes && Array.isArray(custRes.customers)) {
-            state.customers = custRes.customers;
-        }
+        const customersList = Array.isArray(custRes) 
+            ? custRes 
+            : (Array.isArray(custRes?.customers) ? custRes.customers : (Array.isArray(custRes?.data?.customers) ? custRes.data.customers : (Array.isArray(custRes?.data) ? custRes.data : [])));
         
-        const txRes = await LedgerAPI.getTransactions();
-        if (Array.isArray(txRes)) {
-            state.transactions = txRes;
-        } else if (txRes && Array.isArray(txRes.transactions)) {
-            state.transactions = txRes.transactions;
-        }
+        state.customers = Array.isArray(customersList) ? [...customersList] : [];
+        state.pagination = custRes?.pagination || custRes?.data?.pagination || null;
 
-        saveData();
         if (state.currentCustomerId) {
             await openLedger(state.currentCustomerId);
         }
+
+        if (state.customers.length > 0) {
+            const ledgerResults = await Promise.allSettled(state.customers.map(c => LedgerAPI.getCustomerLedger(c.id)));
+            if (!state.isAuthenticated) return;
+            ledgerResults.forEach((result, idx) => {
+                const cust = state.customers[idx];
+                if (!cust) return;
+                if (result.status === 'fulfilled') {
+                    const resData = result.value?.data || result.value;
+                    cust.ledgerSummary = resData?.summary || null;
+                    cust.ledgerSummaryError = false;
+                } else {
+                    console.error(`Failed to fetch ledger summary for ${cust.id}:`, result.reason);
+                    cust.ledgerSummary = null;
+                    cust.ledgerSummaryError = true;
+                }
+            });
+        }
+
+        saveData();
         renderDashboard();
     } catch (err) {
         console.warn("State auto-sync failed:", err);
@@ -1775,36 +1887,44 @@ document.getElementById('customer-form').onsubmit = async (e) => {
 
     await UIManager.runAsync(async () => {
         if (isEdit) {
-            const idx = state.customers.findIndex(c => c.id === id);
-            if (idx !== -1) {
-                state.customers[idx] = { ...state.customers[idx], ...customerData };
-                saveData();
-            }
             if (!state.isTestMode && LedgerAPI.getToken()) {
-                try {
-                    await LedgerAPI.updateCustomer(id, customerData);
-                } catch (err) {
-                    console.warn("Backend updateCustomer skipped/failed:", err);
+                const res = await LedgerAPI.updateCustomer(id, customerData);
+                const serverCust = res?.customer || res?.data?.customer || res;
+                const idx = state.customers.findIndex(c => c.id === id);
+                if (idx !== -1) {
+                    state.customers[idx] = { ...state.customers[idx], ...customerData, ...(serverCust || {}) };
+                    saveData();
+                }
+            } else {
+                const idx = state.customers.findIndex(c => c.id === id);
+                if (idx !== -1) {
+                    state.customers[idx] = { ...state.customers[idx], ...customerData };
+                    saveData();
                 }
             }
         } else {
-            const newCust = {
-                id: 'cust-' + Date.now(),
-                ...customerData,
-                createdAt: new Date().toISOString()
-            };
-            state.customers.push(newCust);
-            saveData();
             if (!state.isTestMode && LedgerAPI.getToken()) {
-                try {
-                    const res = await LedgerAPI.createCustomer(customerData);
-                    if (res && res.id) {
-                        newCust.id = res.id;
-                        saveData();
-                    }
-                } catch (err) {
-                    console.warn("Backend createCustomer skipped/failed:", err);
+                const res = await LedgerAPI.createCustomer(customerData);
+                const serverCust = res?.customer || res?.data?.customer || res;
+                if (!serverCust || !serverCust.id) {
+                    throw new Error("Backend did not return a valid customer UUID.");
                 }
+                const newCust = {
+                    ...customerData,
+                    ...serverCust,
+                    id: serverCust.id,
+                    createdAt: serverCust.createdAt || new Date().toISOString()
+                };
+                state.customers.push(newCust);
+                saveData();
+            } else {
+                const newCust = {
+                    id: 'cust-' + Date.now(),
+                    ...customerData,
+                    createdAt: new Date().toISOString()
+                };
+                state.customers.push(newCust);
+                saveData();
             }
         }
         e.target.reset();
@@ -2244,50 +2364,71 @@ document.getElementById('transaction-form').onsubmit = async (e) => {
     const successMsg = isEdit ? "Transaction updated!" : "Transaction recorded!";
 
     await UIManager.runAsync(async () => {
-        if (isEdit) {
-            transactionData.isEdited = true;
-            transactionData.editedAt = new Date().toISOString();
-            const index = state.transactions.findIndex(t => t.id === newTxnId);
-            if (index !== -1) {
-                state.transactions[index] = { ...state.transactions[index], ...transactionData };
-            }
-        } else {
-            state.transactions.push(transactionData);
-        }
-
-        const targetCust = state.customers.find(c => c.id === customerId);
-        if (targetCust && targetCust.isSettled) {
-            targetCust.isSettled = false;
-            delete targetCust.settlementDate;
-        }
-        
-        saveData();
-
         if (!state.isTestMode && LedgerAPI.getToken()) {
-            try {
-                if (isEdit) {
-                    await LedgerAPI.updateTransaction(newTxnId, {
-                        type: typeValue.toUpperCase(),
-                        amount,
-                        date,
-                        interestStartDate,
-                        interestPhases: phases,
-                        remarks: remarks || null
-                    });
-                } else {
-                    await LedgerAPI.createTransaction({
-                        customerId,
-                        type: typeValue.toUpperCase(),
-                        amount,
-                        date,
-                        interestStartDate,
-                        interestPhases: phases,
-                        remarks: remarks || null
-                    });
-                }
-            } catch (apiErr) {
-                console.warn("Backend transaction save skipped/failed:", apiErr);
+            let res;
+            if (isEdit) {
+                res = await LedgerAPI.updateTransaction(newTxnId, {
+                    type: typeValue.toUpperCase(),
+                    amount,
+                    date,
+                    interestStartDate,
+                    interestPhases: phases,
+                    remarks: remarks || null
+                });
+            } else {
+                res = await LedgerAPI.createTransaction({
+                    customerId,
+                    type: typeValue.toUpperCase(),
+                    amount,
+                    date,
+                    interestStartDate,
+                    interestPhases: phases,
+                    remarks: remarks || null
+                });
             }
+            const serverTxn = res?.transaction || res?.data?.transaction || res;
+            const finalId = (serverTxn && serverTxn.id) ? serverTxn.id : newTxnId;
+            const savedTxn = {
+                ...transactionData,
+                ...(serverTxn || {}),
+                id: finalId,
+                isEdited: isEdit ? true : transactionData.isEdited,
+                editedAt: isEdit ? new Date().toISOString() : transactionData.editedAt
+            };
+            if (isEdit) {
+                const index = state.transactions.findIndex(t => t.id === newTxnId);
+                if (index !== -1) {
+                    state.transactions[index] = savedTxn;
+                } else {
+                    state.transactions.push(savedTxn);
+                }
+            } else {
+                state.transactions.push(savedTxn);
+            }
+            const targetCust = state.customers.find(c => c.id === customerId);
+            if (targetCust && targetCust.isSettled) {
+                targetCust.isSettled = false;
+                delete targetCust.settlementDate;
+            }
+            saveData();
+        } else {
+            // Local/Test mode only
+            if (isEdit) {
+                transactionData.isEdited = true;
+                transactionData.editedAt = new Date().toISOString();
+                const index = state.transactions.findIndex(t => t.id === newTxnId);
+                if (index !== -1) {
+                    state.transactions[index] = { ...state.transactions[index], ...transactionData };
+                }
+            } else {
+                state.transactions.push(transactionData);
+            }
+            const targetCust = state.customers.find(c => c.id === customerId);
+            if (targetCust && targetCust.isSettled) {
+                targetCust.isSettled = false;
+                delete targetCust.settlementDate;
+            }
+            saveData();
         }
 
         e.target.reset();
@@ -2828,20 +2969,41 @@ if (btnBackupDb) {
 async function showDashboard() {
     renderDashboard();
 
+    if (!state.isAuthenticated || state.isTestMode || !LedgerAPI.getToken()) {
+        return;
+    }
+
     try {
         const response = await LedgerAPI.getCustomers();
         const customersList = Array.isArray(response) 
             ? response 
-            : (Array.isArray(response?.customers) ? response.customers : (Array.isArray(response?.data?.customers) ? response.data.customers : (Array.isArray(response?.data) ? response.data : null)));
+            : (Array.isArray(response?.customers) ? response.customers : (Array.isArray(response?.data?.customers) ? response.data.customers : (Array.isArray(response?.data) ? response.data : [])));
 
-        if (Array.isArray(customersList) && customersList.length > 0) {
-            state.customers = [...customersList];
-            state.pagination = response?.pagination || response?.data?.pagination || null;
-            saveData();
-            renderDashboard();
+        state.customers = Array.isArray(customersList) ? [...customersList] : [];
+        state.pagination = response?.pagination || response?.data?.pagination || null;
+
+        if (state.customers.length > 0) {
+            const ledgerResults = await Promise.allSettled(state.customers.map(c => LedgerAPI.getCustomerLedger(c.id)));
+            if (!state.isAuthenticated) return;
+            ledgerResults.forEach((result, idx) => {
+                const cust = state.customers[idx];
+                if (!cust) return;
+                if (result.status === 'fulfilled') {
+                    const resData = result.value?.data || result.value;
+                    cust.ledgerSummary = resData?.summary || null;
+                    cust.ledgerSummaryError = false;
+                } else {
+                    console.error(`Failed to fetch ledger summary for ${cust.id}:`, result.reason);
+                    cust.ledgerSummary = null;
+                    cust.ledgerSummaryError = true;
+                }
+            });
         }
+        saveData();
+        renderDashboard();
     } catch (err) {
-        console.warn("Backend API unavailable, displaying local storage customer data:", err);
+        console.error("Backend getCustomers failed:", err);
+        UIManager.showErrorModal("Dashboard Sync Failed", "Unable to load customer accounts from backend server. " + (err.message || ""));
         renderDashboard();
     }
 }
@@ -2902,9 +3064,8 @@ window.syncLocalDataToCloud = syncLocalDataToCloud;
 
 // --- SESSION CHECK ---
 function checkSession() {
-    // Redirection callback disabled for test mode to prevent kicking user back to login screen
     LedgerAPI.setUnauthorizedHandler(() => {
-        console.warn("[Auth Interceptor] 401 Unauthorized response received. Automatic home redirection disabled for testing.");
+        handleLogout("Session expired. Please sign in again.");
     });
 
     const errorEl = document.getElementById('login-error');
@@ -2921,7 +3082,6 @@ function checkSession() {
         document.getElementById('auth-view').classList.remove('active');
         document.getElementById('auth-view').classList.add('hidden');
         document.getElementById('app-wrapper').classList.remove('hidden');
-        if (token) syncLocalDataToCloud();
         showDashboard();
     } else {
         state.isAuthenticated = false;
@@ -4914,3 +5074,4 @@ document.getElementById('mark-bad-debt-form')?.addEventListener('submit', handle
 document.getElementById('bad-debt-recovery-form')?.addEventListener('submit', handleBadDebtRecoverySubmit);
 document.getElementById('btn-export-bad-debts-pdf')?.addEventListener('click', downloadBadDebtsPDF);
 document.getElementById('btn-export-bad-debts-excel')?.addEventListener('click', exportBadDebtsToExcel);
+

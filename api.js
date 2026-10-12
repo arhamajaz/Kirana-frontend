@@ -32,6 +32,10 @@ function saveToken(token) {
 
 function getToken() {
     const token = localStorage.getItem(TOKEN_KEY) || localStorage.getItem("ml_pro_jwt_token");
+    if (token && token.startsWith("mock_token_")) {
+        removeToken();
+        return null;
+    }
     if (!token && localStorage.getItem('ml_pro_test_mode') === 'true') {
         return "mock_test_mode_token";
     }
@@ -138,13 +142,13 @@ async function request(method, endpoint, body = null, authenticated = false, ret
         response = await fetch(url, config);
         clearTimeout(timeoutId);
     } catch (networkError) {
-        if (retries > 0) {
+        if (retries > 0 && method.toUpperCase() === 'GET') {
             console.warn(`[API Interceptor] Retrying fetch (${retries} attempts remaining) for ${endpoint}...`);
             await new Promise(res => setTimeout(res, 1500));
             return request(method, endpoint, body, authenticated, retries - 1);
         }
         console.error("Fetch Network Error:", networkError);
-        const err = new Error("Network error: Please check if backend server is running at " + API.BASE_URL);
+        const err = new Error("Network error: Server may be unreachable or starting up (cold start). Please try again in 15-20 seconds.");
         err.isOffline = true;
         throw err;
     }
@@ -204,25 +208,16 @@ async function loginUser(email, password) {
     const cleanEmail = email ? String(email).trim().toLowerCase() : "";
     const cleanPwd = password ? String(password) : "";
 
-    try {
-        const res = await request("POST", "/auth/login", { 
-            email: cleanEmail, 
-            password: cleanPwd 
-        }, false);
+    const res = await request("POST", "/auth/login", { 
+        email: cleanEmail, 
+        password: cleanPwd 
+    }, false);
 
-        if (res && res.token) {
-            saveToken(res.token);
-        }
-        return res;
-    } catch (err) {
-        if (err.isOffline || (err.message && err.message.includes("Network error"))) {
-            console.warn("Backend server offline. Falling back to demo mode.");
-            const mockToken = "mock_token_" + Date.now();
-            saveToken(mockToken);
-            return { token: mockToken, user: { email, businessName: "Malwa Merchants (Demo)" } };
-        }
-        throw err;
+    const token = res?.token || res?.data?.token;
+    if (token) {
+        saveToken(token);
     }
+    return res;
 }
 
 async function registerUser(email, password, name = "", businessName = "") {
@@ -231,27 +226,18 @@ async function registerUser(email, password, name = "", businessName = "") {
     const cleanName = name ? String(name).trim() : "";
     const cleanShop = businessName ? String(businessName).trim() : "";
 
-    try {
-        const res = await request("POST", "/auth/register", {
-            email: cleanEmail,
-            password: cleanPwd,
-            name: cleanName,
-            businessName: cleanShop
-        }, false);
+    const res = await request("POST", "/auth/register", {
+        email: cleanEmail,
+        password: cleanPwd,
+        name: cleanName,
+        businessName: cleanShop
+    }, false);
 
-        if (res && res.token) {
-            saveToken(res.token);
-        }
-        return res;
-    } catch (err) {
-        if (err.isOffline || (err.message && err.message.includes("Network error"))) {
-            console.warn("Backend server offline. Falling back to demo mode.");
-            const mockToken = "mock_token_" + Date.now();
-            saveToken(mockToken);
-            return { token: mockToken, user: { email, businessName: cleanShop || cleanName || "Malwa Merchants (Demo)" } };
-        }
-        throw err;
+    const token = res?.token || res?.data?.token;
+    if (token) {
+        saveToken(token);
     }
+    return res;
 }
 
 async function login(email, password) {
@@ -604,3 +590,5 @@ window.LedgerAPI = {
     sanitizeRate,
     sanitizeAmount
 };
+
+
