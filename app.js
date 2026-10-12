@@ -1001,15 +1001,30 @@ function renderDashboard(searchTerm = '') {
     }
 
     let globalPrincipal = 0;
-    let globalInterest = 0;
+    let globalGrossInterest = 0;
     let globalNet = 0;
 
     (state.customers || []).forEach(c => {
         const ledger = calculateLedger(c.id);
+        const custBreakdown = (c.id === state.currentCustomerId && Array.isArray(state.currentLedgerBreakdownLog))
+            ? state.currentLedgerBreakdownLog
+            : (computeLocalBreakdownLog(c.id).breakdownLog || []);
+
+        const custGrossInterest = Array.isArray(custBreakdown) && custBreakdown.length > 0
+            ? roundMoney(custBreakdown.reduce((sum, phase) => sum + (Number(phase.interestGenerated) || 0), 0))
+            : roundMoney(ledger.totalAccruedInterest || 0);
+
+        // Directive 2: Sum all customers' Raw Principals (Total Debits - Total Credits)
         globalPrincipal = roundMoney(globalPrincipal + ledger.rawPrincipal);
-        globalInterest = roundMoney(globalInterest + ledger.totalAccruedInterest);
+        globalGrossInterest = roundMoney(globalGrossInterest + custGrossInterest);
         globalNet = roundMoney(globalNet + ledger.netOutstanding);
     });
+
+    // Directive 2: Total Interest Accrued bridges the gap between Raw Principal and Total Net Balance
+    let globalInterest = globalGrossInterest;
+    if (globalNet > 0 && globalPrincipal >= 0 && Math.abs(roundMoney(globalPrincipal + globalGrossInterest) - globalNet) <= 0.05) {
+        globalInterest = roundMoney(globalNet - globalPrincipal);
+    }
 
     const dashNetEl = document.getElementById('dash-stat-net');
     if (document.getElementById('dash-stat-principal')) {
